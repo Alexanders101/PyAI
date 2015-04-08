@@ -230,7 +230,7 @@ class Brain:
         [cluster.KMeans, cluster.MiniBatchKMeans, cluster.AffinityPropagation, cluster.MeanShift])
     __version__ = '0.9'
 
-    def __init__(self, init_x, init_y=None, supervised=False, labels=None, median=False, data_manipulation=None):
+    def __init__(self, init_x, init_y=None, supervised=False, labels=None, data_manipulation=None, median=False):
         # Start: Error Handling
         if len(init_x) == 0 or len(init_x[0]) == 0:
             print('Error! No Data')

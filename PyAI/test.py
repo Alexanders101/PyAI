@@ -72,7 +72,7 @@ def test():
     brain.init_neural_net()
     brain.autoCalculateWeights(xTest, yTest, 0.5)
     if test_functions(brain, xTest[0], 0):
-        print('All Done')
+        print('Everything is good')
 
 
 def manipulations():
