@@ -19,3 +19,4 @@ many open-source and personal machine learning libraries.
 1. `python setup.py build`
 2. `sudo python setup.py install`
 3. In python: `import PyAI`
+4. Test by typing: `PyAI.test()`
