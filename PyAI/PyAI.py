@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Alex'
-__version__ = 1.1
+__version__ = 0.9
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -228,7 +228,7 @@ class Brain:
     """
     __predictionClusterTypes = np.array(
         [cluster.KMeans, cluster.MiniBatchKMeans, cluster.AffinityPropagation, cluster.MeanShift])
-    __version__ = '1.3'
+    __version__ = '0.9'
 
     def __init__(self, init_x, init_y=None, supervised=False, labels=None, median=False, data_manipulation=None):
         # Start: Error Handling
