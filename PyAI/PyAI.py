@@ -7,7 +7,7 @@ __version__ = 1.1
 import warnings
 warnings.filterwarnings("ignore")
 
-from utils import *
+from PyAI.utils import *
 from sklearn import *
 from scipy import stats
 from operator import itemgetter
