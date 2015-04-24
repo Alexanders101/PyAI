@@ -2,12 +2,18 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Alex'
-__version__ = 0.9
+__version__ = 0.91
 
 import warnings
 warnings.filterwarnings("ignore")
 
-from utils import *
+from sys import version_info
+if version_info[0] == 2: # Python 2.x
+    from utils import *
+elif version_info[0] == 3: # Python 3.x
+    from PyAI.utils import *
+
+
 from sklearn import *
 from scipy import stats
 from operator import itemgetter

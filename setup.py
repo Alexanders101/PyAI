@@ -3,7 +3,7 @@
 from distutils.core import setup
 
 setup(name='PyAI',
-      version='0.9',
+      version='0.91',
       description='Python Machine Learning Framework',
       author='Alex Shmakov',
       author_email='Alexanders101@gmail.com',
