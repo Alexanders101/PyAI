@@ -59,7 +59,7 @@ class MODEL:
     AffProp = cluster.AffinityPropagation
     MShift = cluster.MeanShift
     Spectral = cluster.SpectralClustering
-    Ward = cluster.Ward
+    # Ward = cluster.Ward
     Agglomerative = cluster.AgglomerativeClustering
     DBScan = cluster.DBSCAN
     class SVM:
@@ -71,7 +71,7 @@ class MODEL:
 
     @staticmethod
     def iterate():
-        models = [MODEL.KMean, MODEL.MiniBatch, MODEL.AffProp, MODEL.MShift, MODEL.Spectral, MODEL.Ward,
+        models = [MODEL.KMean, MODEL.MiniBatch, MODEL.AffProp, MODEL.MShift, MODEL.Spectral,
                   MODEL.Agglomerative, MODEL.DBScan]
         return iter(models)
 class SCORING:
@@ -332,12 +332,12 @@ class Brain:
             t1 = time.time()
             print('Time to complete ' + self.__modelType + ' was:\t%.2fs' % (t1 - t0))
 
-        elif type(model()) is cluster.Ward:
-            self.__modelType = 'Ward Clustering'
-            self.__model = model(nClusters)
-            t0 = time.time()
-            self.__model.fit(initX)
-            t1 = time.time()
+        # elif type(model()) is cluster.Ward:
+        #     self.__modelType = 'Ward Clustering'
+        #     self.__model = model(nClusters)
+        #     t0 = time.time()
+        #     self.__model.fit(initX)
+        #     t1 = time.time()
 
         elif type(model()) is cluster.AgglomerativeClustering:
             self.__modelType = 'Agglomerative Clustering'
@@ -410,9 +410,9 @@ class Brain:
             self.__modelType = 'Spectral Clustering'
             self.__model = model(nClusters)
 
-        elif type(model()) is cluster.Ward:
-            self.__modelType = 'Ward Clustering'
-            self.__model = model(nClusters)
+        # elif type(model()) is cluster.Ward:
+        #     self.__modelType = 'Ward Clustering'
+        #     self.__model = model(nClusters)
 
         elif type(model()) is cluster.AgglomerativeClustering:
             self.__modelType = 'Agglomerative Clustering'
