@@ -1,94 +1,109 @@
 __author__ = 'alex'
+
+import warnings
+warnings.filterwarnings("ignore")
+
 from sys import version_info
+
 if version_info[0] == 2: # Python 2.x
     from PyAI import *
+    from PyAI import __version__
 elif version_info[0] == 3: # Python 3.x
-    from PyAI.PyAI import *
+    from PyAI import *
+    from PyAI import __version__
 
-from sklearn import *
+import unittest
+import sys
+import os
+
+np.random.seed(0)
+xData, yData = datasets.make_blobs(1000, 6, 5, random_state=0)
+xTrain, xTest, yTrain, yTest = cross_validation.train_test_split(xData, yData, test_size=0.33, random_state=0)
+
+class ClusterTestCase(unittest.TestCase):
+
+    def test_minibatch_req(self):
+        brain = Brain(xTest)
+        with self.assertRaises(missing_param_error):
+            brain.init_clustering(model=CLUSTER.MiniBatch)
+
+    def test_minibatch_get(self):
+        brain = Brain(xTest)
+        brain.init_clustering(model=CLUSTER.MiniBatch, n_clusters=5)
+
+        self.assertEqual(type(brain._Brain__cluster), cluster.k_means_.MiniBatchKMeans)
+
+        self.assertTrue((array([2,  9, -7, -8,  -9, 5]) == brain.get_cluster(0)[0].astype(int)).all())
+
+        with self.assertRaises(AttributeError):
+            brain.get_cluster_data(0)
+
+        self.assertTrue((brain.get_cluster_labels()[:10] ==[4,2,3,1,3,0,1,1,0,0]).all())
+
+    def test_minibatch_predict(self):
+        brain = Brain(xTrain)
+        brain.init_clustering(model=CLUSTER.MiniBatch, n_clusters=5)
+
+        self.assertEqual(brain.predict_cluster_class(xTest[0]), 4)
+        self.assertTrue((brain.predict_cluster_class(xTest[2:12]) == [1,0,1,3,0,0,3,3,2,1]).all())
+
+        pred = brain.predict_cluster_fuzzy(xTest[0])
+
+        self.assertEqual(pred.shape, (5,2))
+        self.assertEqual(pred[:, 1].sum(), 1.0)
+
+        with self.assertRaises(AttributeError):
+            brain.predict_cluster_data(xTest[0])
+
+    def test_dbscan(self):
+        brain = Brain(xTrain)
+        brain.init_clustering(model=CLUSTER.DBScan, eps=5, min_samples=10)
+
+        #Basic Checks
+        self.assertFalse(brain.predict_cluster_class(xTest[0]))
+        self.assertEqual(len(brain.get_cluster(0)), 124)
+
+        # Outlier Check
+        brain.init_clustering(model=CLUSTER.DBScan)
+        self.assertTrue((brain.get_cluster_labels() == -1).all())
 
 
-def test_functions(model=Brain, testPoint=[[1, 1]], testLabel=0):
-    print('Starting Test. Version %s' % model.__version__)
-    t0 = time.time()
-    for i in range(1000):
-        model.get_data(0)
-        model.get_point(0)
-        model.get_cluster(testLabel)
-        model.get_cluster_data(testLabel)
-        model.get_cluster_labels()
-        model.get_cluster_type()
-        model.get_label()
-        model.get_neighbors(testPoint)
-        model.get_neighbor_data(testPoint)
-        model.get_neighbor_data(testPoint, weighted=True)
-        model.get_SVM_data(testLabel)
-        model.get_SVM_data(testLabel, True)
-        model.get_SVM_group(testLabel)
-        model.get_SVM_group(testLabel, True)
-        model.get_neural_net_data(testLabel)
-        model.get_neural_net_group(testLabel)
-        model.get_gaussian_data(testLabel)
-        model.get_gaussian_group(testLabel)
-        model.get_naive_data(testLabel)
-        model.get_naive_group(testLabel)
-        model.get_semi_supervised_data(testLabel)
-        model.get_semi_supervised_group(testLabel)
-        model.predict_cluster(testPoint)
-        model.predict_cluster_data(testPoint)
-        model.predict_cluster_data(testPoint, True)
-        model.predict_nearest_neighbors(testPoint)
-        model.predict_nearest_neighbors(testPoint, True)
-        model.predict_nearest_neighbors_data(testPoint)
-        model.predict_nearest_neighbors_data(testPoint, True)
-        model.predict_SVM(testPoint)
-        model.predict_SVM(testPoint, True)
-        model.predict_SVM_data(testPoint)
-        model.predict_SVM_data(testPoint, True)
-        model.predict_gaussian(testPoint)
-        model.predict_gaussian_data(testPoint)
-        model.predict_neural_net(testPoint)
-        model.predict_neural_net_data(testPoint)
-        model.predict_naive(testPoint)
-        model.predict_naive_data(testPoint)
-        model.predict_semi_supervised(testPoint)
-        model.predict_semi_supervised_data(testPoint)
-        model.predict_all(testPoint)
-        model.predict_all_data(testPoint)
-        model.predict_all_data_weighted(testPoint)
-    t1 = time.time()
-    print('test completed successfully in %.2fs' % (t1 - t0))
-    return True
+class SVMTestCase(unittest.TestCase):
+
+    def test_init(self):
+        brain = Brain(xTrain)
+        with self.assertRaises(AttributeError):
+            brain.init_svm()
+
+        brain.add_classification_data(yTrain)
+
+        self.assertTrue(brain.init_svm())
+
+    def test_get(self):
+        brain = Brain(xTrain, yTrain)
+        self.assertTrue(brain.init_svm(C=[1.0, 2.0, 3.0]))
+
+
+        self.assertTrue((brain.get_svm_labels()[:10] == [0,1,1,1,4,1,0,1,0,2]).any())
+
+class KNNTestCase(unittest.TestCase):
+
+    def test_init(self):
+        brain = brain = Brain(xTrain)
+
+        self.assertTrue(brain.init_neighbors())
+
 
 
 def test():
-    xData, yData = datasets.make_blobs(1000, 6, 5, random_state=0)
-
-    xTrain, xTest, yTrain, yTest = cross_validation.train_test_split(xData, yData, test_size=0.33, random_state=0)
-    # trainSet = Trainer(xTrain,yTrain)
-    transforms = manipulations()
-    brain = Brain(xTrain, yTrain, True, data_manipulation=transforms)
-    brain.init_clustering(5)
-    brain.init_neighbors(2, 1.0)
-    brain.init_SVM(model=svm.SVC, options='auto', paramRange=[np.arange(1, 10, 1)])
-    brain.init_naive_bayes()
-    brain.init_semi_supervised()
-    brain.init_gaussian_mixture(options='auto', paramRange=[[5], ['tied'], [0.001], np.arange(0.01, 0.1, 0.01), [400]])
-    brain.init_neural_net()
-    brain.autoCalculateWeights(xTest, yTest, 0.5)
-    if test_functions(brain, xTest[0], 0):
-        print('Everything is good')
-
-
-def manipulations():
-    manip = []
-    # Add various manipulations here
-    manip.append(DATA_MANIPULATION.Standardize())
-
-    if len(manip) is not 0:
-        return manip
-    return None
-
+    sys.stdout = open(os.devnull, "w")
+    unittest.main()
+    sys.stdout = sys.__stdout__
 
 if __name__ == '__main__':
     test()
+
+
+
+
+

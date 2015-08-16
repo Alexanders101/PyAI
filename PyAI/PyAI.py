@@ -1,59 +1,33 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
-
-__author__ = 'Alex'
-__version__ = 0.91
-
 import warnings
 warnings.filterwarnings("ignore")
 
-from sys import version_info
-if version_info[0] == 2: # Python 2.x
-    from utils import *
-elif version_info[0] == 3: # Python 3.x
-    from PyAI.utils import *
+__author__ = 'alex'
+__version__ = 2.0
 
+from sys import version_info
+
+if version_info[0] == 2:  # Python 2.x
+    from utils import *
+elif version_info[0] == 3:  # Python 3.x
+    # from PyAI.utils import *
+    from utils import *
 
 from sklearn import *
 from scipy import stats
-from operator import itemgetter
+from scipy.spatial.distance import euclidean
+from time import time
+from copy import copy
 from collections import OrderedDict as oDict
-from enum import Enum
-from mpl_toolkits.mplot3d import Axes3D
-import time
-import copy
+from sklearn.preprocessing.data import binarize
+
+
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
-class CLUSTER_METHOD(Enum):  # Enum for model types used in outputs from Brain
-    Cluster = 0
-    Neighbors = 1
-    SupportVector = 2
-    Gaussian = 3
-    NeuralNet = 4
-    NaiveBayes = 5
-    SemiSupervised = 6
-    Actual = 8
-    Nothing = 7
 
-    @staticmethod
-    def getName(method):
-        if method is CLUSTER_METHOD.Cluster:
-            return 'Cluster'
-        if method is CLUSTER_METHOD.Neighbors:
-            return 'Nearest Neighbors'
-        if method is CLUSTER_METHOD.SupportVector:
-            return 'Support Vector Machine'
-        if method is CLUSTER_METHOD.Gaussian:
-            return 'Gaussian Mixture'
-        if method is CLUSTER_METHOD.NeuralNet:
-            return 'Neural Net'
-        if method is CLUSTER_METHOD.NaiveBayes:
-            return 'Naive Bayes'
-        if method is CLUSTER_METHOD.SemiSupervised:
-            return 'Semi Supervised'
-        if method is CLUSTER_METHOD.Nothing:
-            return 'Normal'
-class MODEL:
+# region Models
+class CLUSTER:
+    __name__ = 'Clustering'
     KMean = cluster.KMeans
     MiniBatch = cluster.MiniBatchKMeans
     AffProp = cluster.AffinityPropagation
@@ -62,39 +36,51 @@ class MODEL:
     # Ward = cluster.Ward
     Agglomerative = cluster.AgglomerativeClustering
     DBScan = cluster.DBSCAN
-    class SVM:
-        SVC = svm.SVC
-        LinearSVC = svm.LinearSVC
-        NuSVC = svm.NuSVC
-        SVR = svm.SVR
-        NuSVR = svm.NuSVR
 
-    @staticmethod
-    def iterate():
-        models = [MODEL.KMean, MODEL.MiniBatch, MODEL.AffProp, MODEL.MShift, MODEL.Spectral,
-                  MODEL.Agglomerative, MODEL.DBScan]
-        return iter(models)
-class SCORING:
-    Precision = metrics.precision_score
-    F1Score = metrics.f1_score
-    RecallScore = metrics.recall_score
-    ZeroOne = metrics.zero_one_loss
 
-    class REGRESSION:
-        RootMeanSquare = metrics.mean_squared_error
-        MeanAbsolute = metrics.mean_absolute_error
-        ExplainedVariance = metrics.explained_variance_score
-        RSquared = metrics.r2_score
+class SVM:
+    __name__ = 'Support Vector Machine'
+    Regular = (svm.SVC, svm.SVR)
+    Linear = (svm.LinearSVC, svm.LinearSVR)
+    Nu = (svm.NuSVC, svm.NuSVR)
 
-    class CLUSTER:
-        AdjustedRandom = metrics.cluster.adjusted_rand_score
-        Completeness = metrics.cluster.completeness_score
-        Homogeneity = metrics.cluster.homogeneity_score
-        VMeasure = metrics.cluster.v_measure_score
-class AUTO:
-    Grid = grid_search.GridSearchCV
-    Random = grid_search.RandomizedSearchCV
-class DATA_MANIPULATION:
+
+class GMM:
+    __name__ = 'Gaussian Mixture'
+    REGULAR = mixture.GMM
+    VARIATIONAL_INFINITE = mixture.DPGMM
+    VARIATIONAL = mixture.VBGMM
+
+
+class LINEAR:
+    BAYESIAN_RIDGE = linear_model.BayesianRidge
+    RIDGE = linear_model.Ridge
+    RIDGE_CLASS = linear_model.RidgeClassifier
+    LOGISTIC = linear_model.LogisticRegression
+    KERNEL_RIDGE = kernel_ridge.KernelRidge
+    SGD = linear_model.SGDRegressor
+    SGD_CLASS = linear_model.SGDClassifier
+
+class DISCRIMINANT_ANALYSIS:
+    LINEAR = lda.LDA
+    QUADRATIC = qda.QDA
+
+class ISOTONIC:
+    REGRESSION = isotonic.IsotonicRegression
+
+class NAIVE_BAYES:
+    REGULAR = naive_bayes.GaussianNB
+    MULTINOMIAL = naive_bayes.MultinomialNB
+    BERNOULLI = naive_bayes.BernoulliNB
+
+class SEMISUPERVISED:
+    PROPAGATION = semi_supervised.LabelPropagation
+    SPREADING = semi_supervised.LabelSpreading
+
+# endregion
+
+
+class TRANSFORMATION:
     @staticmethod
     def Normalize():
         return ('normalization', preprocessing.Normalizer())
@@ -121,7 +107,7 @@ class DATA_MANIPULATION:
 
     @staticmethod
     def VarianceThreshold(threshold=0.0):
-        return ('variance_threshhold', feature_selection.VarianceThreshold(threshold))
+        return ('variance_threshold', feature_selection.VarianceThreshold(threshold))
 
     @staticmethod
     def Isomap(nNeighbors=5, nComponents=2):
@@ -179,628 +165,395 @@ class DATA_MANIPULATION:
             return ('nystroem', kernel_approximation.Nystroem())
 
 
-class _ClusterHold:
-    def __init__(self, model, modelHold, modelType, nClusters, labels, modelAverages):
-        self.model = model
-        self.modelHold = modelHold
-        self.modelType = modelType
-        self.nClusters = nClusters
-        self.labels = labels
-        self.modelAverages = modelAverages
-
-    def getAll(self):
-        return [self.model, self.modelHold, self.modelType, self.nClusters, self.labels, self.modelAverages]
-
-
-class Trainer:
-    def __init__(self, xData, labels):
-        self.nClusters = len(np.unique(labels))
-        self.XVal = np.array(xData)
-        self.YVal = np.array(labels)
-        self.Centers = self.__findCenters()
-
-    @staticmethod
-    def __calculateAverage(points):
-        numElem = len(points[0])
-        numPoints = len(points)
-        averagePoint = [0.0] * numElem
-        for i in iter(points):
-            for j in range(len(i)):
-                averagePoint[j] += i[j]
-        for k in range(numElem):
-            averagePoint[k] = round(float(averagePoint[k] / numPoints), 2)
-        return averagePoint
-
-    def __findCenters(self):
-        averages = np.empty((self.nClusters,len(self.XVal[0])))
-        yVal = self.YVal
-        xVal = self.XVal
-        separatedList = [xVal[yVal == x] for x in np.unique(yVal)]
-        for j in range(self.nClusters):
-            averages[j] = self.__calculateAverage(separatedList[j])
-        return averages
+class Brain:
+    def __str__(self):
+        if self.__classification:
+            n_classes = len(unique(self.__y_labels))
+        else:
+            n_classes = 'N/A'
+        return ("Number of Samples:        \t\t{}\n"
+                "Number of Features:       \t\t{}\n"
+                "Number of Classes:        \t\t{}\n"
+                "Regression Data:          \t\t{}\n"
+                "Classification Data:      \t\t{}\n\n"
+                "Clustering Enabled:       \t\t{}\n"
+                "Nearest Neighbors Enabled:\t\t{}\n"
+                "SVM Enabled:              \t\t{}\n"
+                "Gaussian Mixture Enabled: \t\t{}".format(self.__n_samples, self.__n_features, n_classes,
+                                                          self.__regression,
+                                                          self.__classification, self.__E_cluster, self.__E_knn,
+                                                          self.__E_svm,
+                                                          self.__E_gmm))
 
     def __repr__(self):
-        return self.Centers
+        if self.__classification:
+            n_classes = len(unique(self.__y_labels))
+        else:
+            n_classes = 'N/A'
+        return ("n_samples:      {}\n"
+                "n_features:     {}\n"
+                "n_classes:      {}\n"
+                "regression:     {}\n"
+                "classification: {}\n"
+                "E_cluster:      {}\n"
+                "E_knn:          {}\n"
+                "E_svm:          {}\n"
+                "E_gmm:          {}".format(self.__n_samples, self.__n_features, n_classes, self.__regression,
+                                            self.__classification, self.__E_cluster, self.__E_knn, self.__E_svm,
+                                            self.__E_gmm))
 
-    def getCenters(self):
-        return self.Centers
+    def __init__(self, x_data, y_labels=None, y_data=None, verbose=False):
+        """The base class of the PyAI library.
 
+        This Class will handle all of the initial set up for your data, the only necessary input is your X Data.
 
-class Brain:
-    """
-    This is the main part of the brain. Input data when initializing the Brain.
-    Then run the init methods of whichever methods of prediction you wish to use.
-    """
-    __predictionClusterTypes = np.array(
-        [cluster.KMeans, cluster.MiniBatchKMeans, cluster.AffinityPropagation, cluster.MeanShift])
-    __version__ = '0.9'
+        Attributes:
+            x_data (nd_array): An array of shape (nSamples, nFeatures) that stores the data you are learning from
+            y_data (nd_array, None): An array of shape nSamples that stores known values of each data point"""
 
-    def __init__(self, init_x, init_y=None, supervised=False, labels=None, data_manipulation=None, median=False):
+        self.__n_samples, self.__n_features = x_data.shape
+
         # Start: Error Handling
-        if len(init_x) == 0 or len(init_x[0]) == 0:
+        if self.__n_samples == 0 or self.__n_features == 0:
             print('Error! No Data')
             return
-        if not check_data(init_x):
+        if not check_data(x_data):
             return
         # End: Error Handling
 
-        self.__averageFunction = np.mean
-        if median:
-            self.__averageFunction = np.median
+        # Set up global data
+        self.__x_data = x_data
 
-        self.__XData = np.array(init_x)
-        self.__YData = None
-        if init_y is not None:
-            self.__YData = np.array(init_y)
-        self.__Labels = labels
-        if (labels is None) and supervised:
-            self.__Labels = self.__YData
-        self.__nDataPoints = len(init_x)
-        self.__nElements = len(init_x[0])
-        self.__weights = None
+        # Set up regression data if it exists
+        self.__y_data = y_data
+        self.__regression = y_data is not None
 
-        self.__dataTransformationEnabled = False
-        if data_manipulation is not None:
-            self.__init_data_handling(data_manipulation)
+        # Set up classification data if it exists
+        self.__y_labels = y_labels
+        self.__classification = y_labels is not None
 
-        self.__clusterEnabled = False
-        self.__knnEnabled = False
-        self.__svmEnabled = False
-        self.__gaussianEnabled = False
-        self.__neuralNetEnabled = False
-        self.__naiveEnabled = False
-        self.__semiSupervisedEnabled = False
-        self.__labelsPredicted = False
+        # If either regression or classification data is given, the data is supervised
+        self.__supervised = self.__classification or self.__regression
 
-    # Method Initializations
-    def init_clustering(self, nClusters=8, initCenters='k-means++', model=cluster.KMeans, paramRange=None):
-        """Use nClusters for Params or set it to \'auto\' for: AffinityPropagation, MeanShift, and DBSCAN models:
-        AffinityPropagation: Completely Automatic
-        MeanShift:  Bandwidth = [idk - idk]
-                    min_bin_frequency = [1 - Infinite], 1
-        DBSCAN:     eps = [idk - idk], 0.5
-                    min_samples = [1 - infinity], 5"""
-        self.__clusterEnabled = True
-        initX = self.__XData
-        self.__nClusters = nClusters
-        self.__modelHold = model
+        self.__data_transformed = False
+        # if transform is not None:
+        #     self.__init_data_handling(transform)
 
-        if type(model()) is cluster.KMeans:
-            self.__modelType = 'KMeans Clustering'
-            self.__model = model(nClusters, initCenters)
-            t0 = time.time()
-            self.__model.fit(initX)
-            t1 = time.time()
+        self.__verbose = verbose
 
-        elif type(model()) is cluster.MiniBatchKMeans:
-            self.__modelType = 'Mini Batch KMeans Clustering'
-            self.__model = model(nClusters, initCenters)
-            t0 = time.time()
-            self.__model.fit(initX)
-            t1 = time.time()
+        self.__E_cluster = False
+        self.__E_est = False
+        self.__E_knn = False
+        self.__E_svm = False
+        self.__E_gmm = False
+        self.__E_neural = False
+        self.__E_nb = False
+        self.__E_ss = False
 
-        elif type(model()) is cluster.AffinityPropagation:
-            self.__modelType = 'Affinity Propagation Clustering'
-            self.__model = model()
-            if nClusters is 'auto':
-                self.__auto_calculate_params(CLUSTER_METHOD.Cluster, paramRange)
-            elif type(nClusters) is list:
-                self.__model = model(nClusters[0])
-            t0 = time.time()
-            self.__model.fit(initX)
-            t1 = time.time()
-            self.__nClusters = np.max(self.__model.labels_) + 1
+        self.__cur_data_transformed = False
+        self.__labels_predicted = False
 
-        elif type(model()) is cluster.MeanShift:
-            self.__modelType = 'Mean Shift Clustering'
-            self.__model = model()
-            if nClusters is 'auto':
-                self.__auto_calculate_params(CLUSTER_METHOD.Cluster, paramRange)
-            elif type(nClusters) is list:
-                self.__model = model(nClusters[0], min_bin_freq=nClusters[1])
-            t0 = time.time()
-            self.__model.fit(initX)
-            t1 = time.time()
-            self.__nClusters = np.max(self.__model.labels_) + 1
-
-        elif type(model()) is cluster.SpectralClustering:
-            self.__modelType = 'Spectral Clustering'
-            self.__model = model(nClusters)
-            t0 = time.time()
-            self.__model.fit(initX)
-            t1 = time.time()
-            print('Time to complete ' + self.__modelType + ' was:\t%.2fs' % (t1 - t0))
-
-        # elif type(model()) is cluster.Ward:
-        #     self.__modelType = 'Ward Clustering'
-        #     self.__model = model(nClusters)
-        #     t0 = time.time()
-        #     self.__model.fit(initX)
-        #     t1 = time.time()
-
-        elif type(model()) is cluster.AgglomerativeClustering:
-            self.__modelType = 'Agglomerative Clustering'
-            self.__model = model(nClusters)
-            t0 = time.time()
-            self.__model.fit(initX)
-            t1 = time.time()
-
-        elif type(model()) is cluster.DBSCAN:
-            self.__modelType = 'Density Based Clustering'
-            self.__model = model()
-            if nClusters is 'auto':
-                self.__auto_calculate_params(CLUSTER_METHOD.Cluster, paramRange)
-            elif type(nClusters) is list:
-                self.__model = model(nClusters[0], nClusters[1])
-            t0 = time.time()
-            self.__model.fit(initX)
-            t1 = time.time()
-            self.__nClusters = np.max(self.__model.labels_) + 1
-
-        self.__cluster_labels = self.__model.labels_
-        self.__modelAverages = None
-        if self.__YData is not None:
-            self.__calculate_centroid_averages()
-        print('Time to complete ' + self.__modelType + ' was:\t%.2fs' % (t1 - t0))
-    def init_guess_labels(self, nClusters=8, initCenters='k-means++', model=cluster.KMeans, paramRange=None):
-        """Used to create labels from clustering algorithms for supervised learning
-        Use nClusters for Params or set it to \'auto\' for: AffinityPropagation, MeanShift, and DBSCAN models:
-        AffinityPropagation: Completely Automatic
-        MeanShift:  Bandwidth = [idk - idk]
-                    min_bin_frequency = [1 - Infinite], 1
-        DBSCAN:     eps = [idk - idk], 0.5
-                    min_samples = [1 - infinity], 5"""
-        self.__labelsPredicted = True
-        self.__guessHold = (nClusters, initCenters, model, paramRange)
-
-        # Save Clustering model if it exists
-        if self.__clusterEnabled:
-            hold = _ClusterHold(self.__model, self.__modelHold, self.__modelType,
-                                self.__nClusters, self.__cluster_labels, self.__modelAverages)
-        initX = self.__XData
-        self.__nClusters = nClusters
-        self.__modelHold = model
-
-        if type(model()) is cluster.KMeans:
-            self.__modelType = 'KMeans Clustering'
-            self.__model = model(nClusters, initCenters)
-
-        elif type(model()) is cluster.MiniBatchKMeans:
-            self.__modelType = 'Mini Batch KMeans Clustering'
-            self.__model = model(nClusters, initCenters)
-
-        elif type(model()) is cluster.AffinityPropagation:
-            self.__modelType = 'Affinity Propagation Clustering'
-            self.__model = model()
-            if nClusters is 'auto':
-                self.__auto_calculate_params(CLUSTER_METHOD.Cluster, paramRange)
-            elif type(nClusters) is list:
-                self.__model = model(nClusters[0])
-
-        elif type(model()) is cluster.MeanShift:
-            self.__modelType = 'Mean Shift Clustering'
-            self.__model = model()
-            if nClusters is 'auto':
-                self.__auto_calculate_params(CLUSTER_METHOD.Cluster, paramRange)
-            elif type(nClusters) is list:
-                self.__model = model(nClusters[0], min_bin_freq=nClusters[1])
-
-        elif type(model()) is cluster.SpectralClustering:
-            self.__modelType = 'Spectral Clustering'
-            self.__model = model(nClusters)
-
-        # elif type(model()) is cluster.Ward:
-        #     self.__modelType = 'Ward Clustering'
-        #     self.__model = model(nClusters)
-
-        elif type(model()) is cluster.AgglomerativeClustering:
-            self.__modelType = 'Agglomerative Clustering'
-            self.__model = model(nClusters)
-
-        elif type(model()) is cluster.DBSCAN:
-            self.__modelType = 'Density Based Clustering'
-            self.__model = model()
-            if nClusters is 'auto':
-                self.__auto_calculate_params(CLUSTER_METHOD.Cluster, paramRange)
-            elif type(nClusters) is list:
-                self.__model = model(nClusters[0], nClusters[1])
-
-        t0 = time.time()
-        self.__model.fit(initX)
-        t1 = time.time()
-
-        self.__Labels = self.__model.labels_
-        if self.__YData is None:
-            self.__YData = self.__Labels
-
-        # Reset Clustering model and clean up
-        if self.__clusterEnabled:
-            self.__model, self.__modelHold, self.__modelType, self.__nClusters, \
-            self.__cluster_labels, self.__modelAverages = hold.getAll()
-        else:
-            del self.__model
-            del self.__modelHold
-            del self.__modelType
-            del self.__nClusters
-            del self.__cluster_labels
-            del self.__modelAverages
-
-        print('Time to complete fake labels was:\t%.2fs' % (t1 - t0))
-    def init_neighbors(self, nNeighbors=5, radius=1.0):
-        """Unsupervised Method: Nearest Neighbors Initialization Method
-            nNeighbors = number of neighbors for n based algorithm
-            radius = radius for distance based algorithm"""
-
-        self.__knnEnabled = True
-
-        self.__knn = neighbors.NearestNeighbors(nNeighbors, radius)
-        t0 = time.time()
-        self.__knn.fit(self.__XData)
-        t1 = time.time()
-        print('Time to complete Nearest Neighbors was:\t%.2fs' % (t1 - t0))
-    def init_SVM(self, model=svm.LinearSVC, options=None, paramRange=10):
-        """ Supervised Method: Support Vector Machine
-            Options: C : [1-1000], 1.0 OR Nu : (0 - 1], 0.5 (For NuSVC)
-                     epsilon : [0 - idk], 0.1 OR Nu : (0 - 1], 0.5 (For SVM OR NuSVM)
-                     Kernel : ['rbf', 'linear', 'poly', 'sigmoid'], 'rbf'
-                     """
-        self.__svmEnabled = True
-        t0 = time.time()
-        self.__svm = model()
-        ydata = self.__Labels
-        if (type(model()) is svm.SVR) or (type(model()) is svm.NuSVR):
-            ydata = self.__YData
-        if options is None:
-            print('\tUsing Default Parameter for Support Vector Machine')
-        elif options == 'auto':
-            self.__auto_calculate_params(CLUSTER_METHOD.SupportVector, paramRange)
-        else:
-            if type(model()) is svm.LinearSVC:
-                self.__svm.C = options[0]
-            elif type(model()) is svm.SVC:
-                self.__svm.C = options[0]
-                self.__svm.kernel = options[1]
-            elif type(model()) is svm.NuSVC:
-                self.__svm.nu = options[0]
-                self.__svm.kernel = options[1]
-            elif type(model()) is svm.SVR:
-                self.__svm.C = options[0]
-                self.__svm.epsilon = options[1]
-                self.__svm.kernel = options[2]
-            elif type(model()) is svm.NuSVR:
-                self.__svm.C = options[0]
-                self.__svm.nu = options[1]
-                self.__svm.kernel = options[2]
-        self.__svmWeighted = copy.copy(self.__svm)
-        self.__svmWeighted.class_weight = 'auto'
-        self.__svm.fit(self.__XData, ydata)
-        self.__svmWeighted.fit(self.__XData, ydata)
-        self.__svmLabels = np.array(self.__svm.predict(self.__XData))
-        self.__svmWeightedLabels = np.array(self.__svmWeighted.predict(self.__XData))
-        t1 = time.time()
-        print('Time to complete Support Vector Machine was:\t%.2fs' % (t1 - t0))
-    def init_gaussian_mixture(self, model=mixture.GMM, options=None, paramRange=None):
-        """Unsupervised Method: Gaussian Mixture
-        Options: n_components = nClusters, 1
-                     covariance_type = Â[\'spherical\'Â, \'Âtied\'Â, \'Âdiag\'Â, \'Âfull\'Â], \'diag\'
-                     min_covar / alpha = [0.0001 - 0.01], 0.001 / [1-1000], 1.0
-                     tol = [0.0001 - 1], 0.01
-                     n_iter = [1 - 10000], 100 """
-
-        self.__gaussianEnabled = True
-
-        self.__gmm = model()
-        self.__gmmType = type(model())
-        t0 = time.time()
-        if options is None:
-            print('\tUsing Default Parameter for Gaussian Mixture')
-        elif options == 'auto':
-            if type(model()) is mixture.GMM:
-                self.__auto_calculate_params(CLUSTER_METHOD.Gaussian, paramRange)
-        else:
-            if type(model()) is mixture.GMM:
-                self.__gmm.n_components = options[0]
-                self.__gmm.covariance_type = options[1]
-                self.__gmm.min_covar = options[2]
-                self.__gmm.thresh = options[3]
-                self.__gmm.n_iter = options[4]
-        del self.__gmmType
-        self.__gmm.fit(self.__XData)
-        self.__gmmLabels = np.array(self.__gmm.predict(self.__XData))
-        t1 = time.time()
-        print('Time to complete Gaussian Mixture was:\t%.2fs' % (t1 - t0))
-    def init_neural_net(self, nComponents=256, estimator=linear_model.LogisticRegression, options=None, paramRange=10):
-        """Supervised Method: Neural Network
-        Options: (Leave range as an integer for random selections)
-                learning_rate = [idk - idk], idk
-                n_iter = [idk - idk], idk
-                C = [1 - 1000], 1.0
-        """
-        self.__neuralNetEnabled = True
-        self.__estimator = estimator()
-        self.__network = neural_network.BernoulliRBM(nComponents)
-        self.__neuralNet = pipeline.Pipeline(steps=[('network', self.__network), ('estimator', self.__estimator)])
-        t0 = time.time()
-        if options is None:
-            print('\tUsing Default Parameter for Neural Net')
-        elif options == 'auto':
-            if type(paramRange) is int:
-                self.__auto_calculate_params(CLUSTER_METHOD.NeuralNet, paramRange, AUTO.Random)
-            else:
-                self.__auto_calculate_params(CLUSTER_METHOD.NeuralNet, paramRange)
-        else:
-            self.__network.learning_rate = options[0]
-            self.__network.n_iter = options[1]
-            self.__estimator.C = options[2]
-
-        self.__neuralNet.fit(self.__XData, self.__Labels)
-        self.__neuralNetLabels = np.array(self.__neuralNet.predict(self.__XData))
-        t1 = time.time()
-        print('Time to complete Neural Net was:\t%.2fs' % (t1 - t0))
-    def init_naive_bayes(self, model=naive_bayes.GaussianNB):
-        """Supervised Method: Naive Bayes"""
-        self.__naiveEnabled = True
-
-        self.__naive = model()
-        t0 = time.time()
-        self.__naive.fit(self.__XData, self.__Labels)
-        self.__naiveLabels = np.array(self.__naive.predict(self.__XData))
-        t1 = time.time()
-        print('Time to complete Naive Bayes Model was:\t%.2fs' % (t1 - t0))
-    def init_semi_supervised(self, nNeighbors=7, kernel='rbf', gamma=20, model=semi_supervised.LabelPropagation):
-        """Supervised Method: Semi-Supervised Classification"""
-        self.__semiSupervisedEnabled = True
-
-        self.__semiSupervised = model(kernel, gamma, nNeighbors)
-        t0 = time.time()
-        self.__semiSupervised.fit(self.__XData, self.__Labels)
-        self.__semiSupervisedLabels = np.array(self.__semiSupervised.predict(self.__XData))
-        t1 = time.time()
-        print('Time to complete Semi Supervised Model was:\t%.2fs' % (t1 - t0))
-
-    def __calculate_centroid_averages(self):
-        self.__modelAverages = np.array(range(self.__nClusters), float)
-        npAverage = np.average
-        clusterData = self.get_cluster_data
-        for i in range(self.__nClusters):
-            self.__modelAverages[i] = npAverage(clusterData(i))
-    def __init_data_handling(self, transformations=()):
-        self.__dataTransformationEnabled = True
-        if type(transformations) is not tuple:
-            transformations = (transformations)
-
+    def init_data_transformation(self, *transformations):
         self.__manipulator = pipeline.Pipeline(transformations)
-        self.__manipulator.fit(self.__XData, self.__YData)
-        self.__XData = self.__manipulator.transform(self.__XData)
-    def __handle_data(self, data):
-        return self.__manipulator.transform(data)
+        self.__manipulator.fit(self.__x_data)
+        self.__x_data = self.__manipulator.transform(self.__x_data)
+        self.__data_transformed = True
+        self.refit_models()
 
     # Universal Get Methods
     def get_point(self, index='all'):
         if index == 'all':
-            return self.__XData
-        return self.__XData[index]
+            return self.__x_data
+        return self.__x_data[index]
+
+    @regression_method()
     def get_data(self, index='all'):
         if index == 'all':
-            return self.__YData
-        return self.__YData[index]
+            return self.__y_data
+        return self.__y_data[index]
+
+    @classification_method()
     def get_label(self, index='all'):
         if index == 'all':
-            return self.__Labels
-        return self.__Labels[index]
-    def get_cluster_type(self):
-        return type(self.__model)
+            return self.__y_labels
+        return self.__y_labels[index]
+
+    """CLUSTER BEGIN"""
+    # Clustering init Methods
+    def init_clustering(self, model=CLUSTER.MiniBatch, **model_params):
+        # Set params for various clustering types
+        print("\nStarting Clustering")
+        if model is CLUSTER.MiniBatch:
+            n_clusters = handle_required(model_params, ['n_clusters'])
+            batch_size, init = handle_optional(model_params, [['batch_size', 100],
+                                                              ['init', 'k-means++']])
+            self.__cluster_type = 'Mini Batch KMeans Clustering'
+            self.__cluster = model(n_clusters=n_clusters, batch_size=batch_size, init=init)
+
+        if model is CLUSTER.KMean:
+            n_clusters = handle_required(model_params, ['n_clusters'])
+            batch_size, init = handle_optional(model_params, [['init', 'k-means++']])
+
+            self.__cluster_type = 'KMeans Clustering'
+            self.__cluster = model(n_clusters=n_clusters, init=init)
+
+        if model is CLUSTER.DBScan:
+            eps, min_samples = handle_optional(model_params, [['eps', 0.5],
+                                                              ['min_samples', 5]])
+            self.__cluster_type = 'Density Based Clustering'
+            self.__cluster = model(eps=eps, min_samples=min_samples)
+
+        if model is CLUSTER.AffProp:
+            damping, convergence_iter = handle_optional(model_params, [['damping', 0.5],
+                                                                       ['convergence_iter', 15]])
+            self.__cluster_type = 'Affinity Propagation'
+            self.__cluster = model(damping=damping, convergence_iter=convergence_iter)
+
+        if model is CLUSTER.Agglomerative:
+            n_clusters = handle_required(model_params, ['n_clusters'])
+            linkage = handle_optional(model_params, [['linkage', 'ward']])
+
+            self.__cluster_type = 'Agglomerative Clustering'
+            self.__cluster = model(n_clusters=n_clusters, linkage=linkage)
+
+
+        # Make model with params
+        t0 = time()
+        self.__cluster.fit(self.__x_data)
+        t1 = time()
+
+        # make miscellaneous variables
+        self.__cluster_params = (model, model_params)
+        self.__cluster_labels = self.__cluster.labels_
+        self.__cluster_classes = unique(self.__cluster_labels)
+        self.__cluster_centers = self.__calculate_cluster_centers()
+        self.__cluster_regression_centers = self.__calculate_cluster_regression_centers()
+        self.__E_cluster = True
+
+        print('Time to complete ' + self.__cluster_type + ' was:\t%.2fs' % (t1 - t0))
+        if self.__verbose:
+            print(self.__cluster)
+
+    def init_estimate_labels(self, model=CLUSTER.MiniBatch, **model_params):
+        if self.__classification:
+            print("Labels already provided, no need to estimate.")
+            return
+
+        enabled = self.__E_cluster
+        if enabled:
+            cluster_hold = (self.__cluster, self.__cluster_type, self.__cluster_labels,
+                            self.__cluster_classes, self.__cluster_centers, self.__cluster_regression_centers)
+
+        self.init_clustering(model, **model_params)
+
+        self.__y_labels = self.__cluster_labels
+        self.__classification = True
+        self.__E_cluster = enabled
+        self.__est_params = (model, model_params)
+        self.__E_est = True
+        if enabled:
+            self.__cluster, self.__cluster_type, self.__cluster_labels, \
+            self.__cluster_classes, self.__cluster_centers, self.__cluster_regression_centers = cluster_hold
+            del cluster_hold
+        else:
+            del self.__cluster
+            del self.__cluster_type
+            del self.__cluster_labels
+            del self.__cluster_classes
+            del self.__cluster_centers
+            del self.__cluster_regression_centers
+
+    # Clustering Utility Methods
+    def __calculate_cluster_centers(self):
+        try:
+            return self.__cluster.cluster_centers_
+        except AttributeError:
+            return array([mean(self.__x_data[self.__cluster_labels == label], 0)
+                          for label in unique(self.__cluster_labels)])
+
+    def __calculate_cluster_regression_centers(self):
+        if not self.__regression:
+            return None
+        return array([mean(self.__y_data[self.__cluster_labels == label], 0)
+                      for label in unique(self.__cluster_labels)])
+
+    def __get_distances(self, x):
+        try:
+            return self.__cluster.transform(x)[0]
+        except AttributeError:
+            return array([euclidean(x, center) for center in self.__cluster_centers])
 
     # Clustering Get Methods
-    @init_check('_Brain__clusterEnabled')
+    @init_check('_Brain__E_cluster')
     def get_cluster(self, label):
-        return self.__XData[self.__cluster_labels == label]
-    @init_check('_Brain__clusterEnabled')
+        return self.__x_data[self.__cluster_labels == label]
+
+    @regression_method()
+    @init_check('_Brain__E_cluster')
     def get_cluster_data(self, label):
-        return self.__YData[self.__cluster_labels == label]
-    @init_check('_Brain__clusterEnabled')
+        return self.__y_data[self.__cluster_labels == label]
+
+    @init_check('_Brain__E_cluster')
     def get_cluster_labels(self):
         return self.__cluster_labels
-    def __get_centroid_average(self, label):
-        return self.__modelAverages[label]
+
+    # Clustering Predict Methods
+    @init_check('_Brain__E_cluster')
     @data_transform()
-    def __get_distances(self, X):
-        return self.__model.transform(X)[0]
-
-    # Nearest Neighbor Get Methods
-    @data_transform()
-    def get_neighbors(self, X, nNeighbors=-1):
-        if nNeighbors == -1:
-            nNeighbors = self.get_n_neighbors()
-        indices = self.__knn.kneighbors(X, nNeighbors)[1][0]
-        return itemgetter(indices)(self.__XData)
-    @data_transform()
-    def get_neighbor_data(self, X, nNeighbors=-1, weighted=False):
-        if nNeighbors == -1:
-            nNeighbors = self.get_n_neighbors()
-        curNeighbors = self.__knn.kneighbors(X, nNeighbors)
-        indices = curNeighbors[1][0]
-        if weighted:
-            weights = weights_from_distances(curNeighbors[0][0])
-            return np.array([itemgetter(indices)(self.__YData), weights])
-        return itemgetter(indices)(self.__YData)
-    def get_n_neighbors(self):
-        return self.__knn.n_neighbors
-
-    # Support Vector Machine Get Methods
-    def get_SVM_group(self, label, weighted=False):
-        if weighted:
-            return self.__XData[self.__svmWeightedLabels == label]
-        return self.__XData[self.__svmLabels == label]
-    def get_SVM_data(self, label, weighted=False):
-        if weighted:
-            return self.__YData[self.__svmWeightedLabels == label]
-        return self.__YData[self.__svmLabels == label]
-
-    # Gaussian Mixture Get Methods
-    def get_gaussian_group(self, label):
-        return self.__XData[self.__gmmLabels == label]
-    def get_gaussian_data(self, label):
-        return self.__YData[self.__gmmLabels == label]
-
-    # Neural Net get Methods
-    def get_neural_net_group(self, label):
-        return self.__XData[self.__neuralNetLabels == label]
-    def get_neural_net_data(self, label):
-        return self.__YData[self.__neuralNetLabels == label]
-
-    # Naive Bayes Get Methods
-    def get_naive_group(self, label):
-        return self.__XData[self.__naiveLabels == label]
-    def get_naive_data(self, label):
-        return self.__YData[self.__naiveLabels == label]
-
-    # SemiSupervised Get Methods
-    def get_semi_supervised_group(self, label):
-        return self.__XData[self.__semiSupervisedLabels == label]
-    def get_semi_supervised_data(self, label):
-        return self.__YData[self.__semiSupervisedLabels == label]
-
-    # Prediction Methods
-    # Clustering
-    @data_transform()
-    def predict_cluster(self, X):
-        if self.get_cluster_type() in Brain.__predictionClusterTypes:
-            prediction = self.__model.predict(X)
-        else:
-            print(self.__modelType + ' is not able to predict Points')
+    def predict_cluster_class(self, x):
+        try:
+            prediction = self.__cluster.predict(x)
+        except AttributeError:
+            print(self.__cluster_type + ' is not able to predict points')
             return None
-            # TODO: Have a long hard think about this
-            predModel = copy.copy(self.__model)
-            xD = copy.copy(self.__XData)
-            X = [X]
-            xD = np.concatenate((xD, X), 0)
-            predModel.fit(xD)
-            prediction = predModel.labels_[(0 - len(X)):]
+
         if len(prediction) == 1:
             return prediction[0]
         return prediction
-    def predict_cluster_data(self, X, weighted=False, average=True):
-        prediction = self.predict_cluster(X)
-        if prediction is None:
-            return None
-        if type(prediction) is np.ndarray:
-            if weighted:
-                distance = self.__get_distances
-                getWeights = weights_from_distances
-                weightedAve = weighted_average
-                clusterAverages = self.__modelAverages
-                if average:
-                    return np.array(
-                        [weightedAve([clusterAverages, getWeights(distance(pred), 3, False)]) for pred in X])
-                return np.array([[clusterAverages, getWeights(distance(pred), 3, False)] for pred in X])
-            getData = self.get_cluster_data
-            if average:
-                average = self.__averageFunction
-                return np.array([average(getData(pred), 0) for pred in prediction])
-            return np.array([getData(pred) for pred in prediction])
 
-        if weighted:
-            data = np.array([self.__modelAverages, weights_from_distances(self.__get_distances(X), 3, False)])
-            if average:
-                return weighted_average(data)
-            return data
-        if average:
-            return self.__averageFunction(self.get_cluster_data(prediction), 0)
-        return self.get_cluster_data(prediction)
-
-    # Nearest Neighbors
+    @init_check('_Brain__E_cluster')
     @data_transform()
-    def predict_nearest_neighbors(self, X, weighted=False, nNeighbors=None):
-        if type(X) is not np.ndarray:
-            X = np.array(X)
-        if len(np.shape(X)) == 1:
-            X = X.reshape(1, -1)
+    def predict_cluster_fuzzy(self, x):
+        if len(x.shape) is 1:
+            x = array([x])
+        data = array([transpose(array([self.__cluster_classes,
+                                       weights_from_distances(self.__get_distances(point), 3, False)], object))
+                      for point in x])
+        if len(data) == 1:
+            return data[0]
+        return data
 
-        distances, indeces = self.__knn.kneighbors(X, nNeighbors)
+    @regression_method()
+    @init_check('_Brain__E_cluster')
+    @data_transform()
+    def predict_cluster_data(self, x):
+        if len(x.shape) is 1:
+            x = array([x])
+        data = array([weighted_average([self.__cluster_regression_centers,
+                                        weights_from_distances(self.__get_distances(point), 3, False)])
+                      for point in x])
+        if len(data) == 1:
+            return data[0]
+        return data
 
-        classes_ = np.unique(self.__Labels)
-        y = self.__Labels
+    """CLUSTER END"""
+
+    """NEAREST NEIGHBORS BEGIN"""
+
+    def init_neighbors(self, n_neighbors=5, radius=1.0):
+        """Unsupervised Method: Nearest Neighbors Initialization Method
+            nNeighbors = number of neighbors for n based algorithm
+            radius = radius for distance based algorithm"""
+        print("\nStarting Nearest Neighbors")
+
+        self.__knn = neighbors.NearestNeighbors(n_neighbors, radius)
+        t0 = time()
+        self.__knn.fit(self.__x_data)
+        t1 = time()
+
+        self.__knn_params = (n_neighbors, radius)
+        self.__E_knn = True
+        print('Time to complete Nearest Neighbors was:\t%.2fs' % (t1 - t0))
+        if self.__verbose:
+            print(self.__knn)
+        return True
+
+    # Nearest Neighbor Get Methods
+    @init_check('_Brain__E_knn')
+    @data_transform()
+    def get_knn_nearest(self, x, n_neighbors=None, ind=False):
+        indices = self.__knn.kneighbors(x, n_neighbors)[1]
+        if ind:
+            return indices
+        return array([self.__x_data[index] for index in indices])
+
+    @data_transform()
+    @init_check('_Brain__E_knn')
+    def get_knn_radius(self, x, radius=None, ind=False):
+        indices = self.__knn.radius_neighbors(x, radius)[1]
+        if ind:
+            return indices
+        return array([self.__x_data[index] for index in indices])
+
+    # Nearest Neighbors Predict Methods
+    @classification_method()
+    @init_check('_Brain__E_knn')
+    @data_transform()
+    def predict_knn_nearest_class(self, x, weighted=False, n_neighbors=None):
+        if type(x) is not ndarray:
+            x = array(x)
+        if len(shape(x)) == 1:
+            x = x.reshape(1, -1)
+
+        distances, indices = self.__knn.kneighbors(x, n_neighbors)
+
+        classes_ = unique(self.__y_labels)
+        y = self.__y_labels
         if y.ndim == 1:
             y = y.reshape((-1, 1))
             classes_ = [classes_]
 
         n_outputs = len(classes_)
-        n_samples = X.shape[0]
+        n_samples = x.shape[0]
 
-        y_pred = np.empty((n_samples, n_outputs), dtype=classes_[0].dtype)
+        y_pred = empty((n_samples, n_outputs), dtype=classes_[0].dtype)
         for k, classes_k in enumerate(classes_):
             if not weighted:
-                mode, _ = stats.mode(y[indeces, k], axis=1)
+                mode, _ = stats.mode(y[indices, k], axis=1)
             else:
                 weights = [weights_from_distances(distance) for distance in distances]
-                mode, _ = weighted_mode(y[indeces, k], weights, axis=1)
+                mode, _ = weighted_mode(y[indices, k], weights, axis=1)
 
-            mode = np.asarray(mode.ravel(), dtype=np.intp)
+            mode = asarray(mode.ravel(), dtype=intp)
             y_pred[:, k] = classes_k.take(mode)
 
-        if self.__Labels.ndim == 1:
+        if self.__y_labels.ndim == 1:
             y_pred = y_pred.ravel()
         if len(y_pred) is 1:
             y_pred = y_pred[0]
 
         return y_pred
-    @data_transform()
-    def predict_nearest_neighbors_data(self, X, weighted=False, nNeighbors=None):
-        distances, indeces = self.__knn.kneighbors(X, nNeighbors)
 
-        y = self.__YData
+    @regression_method()
+    @init_check('_Brain__E_knn')
+    @data_transform()
+    def predict_knn_nearest_data(self, x, weighted=False, n_neighbors=None):
+        distances, indices = self.__knn.kneighbors(x, n_neighbors)
+
+        y = self.__y_data
         if y.ndim == 1:
             y = y.reshape((-1, 1))
 
         if not weighted:
-            y_pred = np.mean(y[indeces], axis=1)
+            y_pred = mean(y[indices], axis=1)
         else:
             weights = [weights_from_distances(distance) for distance in distances]
-            y_pred = np.array([(np.average(y[ind, :], axis=0,
-                                           weights=weights[i]))
-                               for (i, ind) in enumerate(indeces)])
-        if self.__YData.ndim == 1:
+            y_pred = array([(average(y[ind, :], axis=0,
+                                     weights=weights[i]))
+                            for (i, ind) in enumerate(indices)])
+        if self.__y_data.ndim == 1:
             y_pred = y_pred.ravel()
         if len(y_pred) is 1:
             y_pred = y_pred[0]
         return y_pred
+
+    @classification_method()
+    @init_check('_Brain__E_knn')
     @data_transform()
-    def predict_radius_neighbors(self, X, weighted=False, radius=None):
-        if type(X) is not np.ndarray:
-            X = np.array(X)
-        if len(np.shape(X)) == 1:
-            X = X.reshape(1, -1)
+    def predict_knn_radius_class(self, x, weighted=False, radius=None):
+        if type(x) is not ndarray:
+            x = array(x)
+        if len(shape(x)) == 1:
+            x = x.reshape(1, -1)
 
-        n_samples = X.shape[0]
+        n_samples = x.shape[0]
 
-        distances, indeces = self.__knn.radius_neighbors(X, radius)
-        inliers = [i for i, nind in enumerate(indeces) if len(nind) != 0]
-        outliers = [i for i, nind in enumerate(indeces) if len(nind) == 0]
+        distances, indices = self.__knn.radius_neighbors(x, radius)
+        inliers = [i for i, nind in enumerate(indices) if len(nind) != 0]
+        outliers = [i for i, nind in enumerate(indices) if len(nind) == 0]
 
-        classes_ = np.unique(self.__Labels)
-        y = self.__Labels
+        classes_ = unique(self.__y_labels)
+        y = self.__y_labels
         if y.ndim == 1:
             y = y.reshape((-1, 1))
             classes_ = [classes_]
@@ -813,19 +566,19 @@ class Brain:
                              'or consider removing them from your dataset.'
                              % outliers)
 
-        y_pred = np.empty((n_samples, n_outputs), dtype=classes_[0].dtype)
+        y_pred = empty((n_samples, n_outputs), dtype=classes_[0].dtype)
         for k, classes_k in enumerate(classes_):
-            pred_labels = np.array([y[ind, k] for ind in indeces],
-                                   dtype=object)
+            pred_labels = array([y[ind, k] for ind in indices],
+                                dtype=object)
             if not weighted:
-                mode = np.array([stats.mode(pl)[0]
-                                 for pl in pred_labels[inliers]], dtype=np.int)
+                mode = array([stats.mode(pl)[0]
+                              for pl in pred_labels[inliers]], dtype=int)
             else:
                 weights = [weights_from_distances(distance) for distance in distances]
-                mode = np.array([weighted_mode(pl, w)[0]
-                                 for (pl, w)
-                                 in zip(pred_labels[inliers], weights)],
-                                dtype=np.int)
+                mode = array([weighted_mode(pl, w)[0]
+                              for (pl, w)
+                              in zip(pred_labels[inliers], weights)],
+                             dtype=int)
 
             mode = mode.ravel()
 
@@ -834,538 +587,532 @@ class Brain:
         if outliers:
             y_pred[outliers, :] = -1
 
-        if self.__Labels.ndim == 1:
+        if self.__y_labels.ndim == 1:
             y_pred = y_pred.ravel()
         if len(y_pred) is 1:
             y_pred = y_pred[0]
 
         return y_pred
-    @data_transform()
-    def predict_radius_neighbors_data(self, X, weighted=False, radius=None):
-        distances, indeces = self.__knn.radius_neighbors(X, radius)
 
-        y = self.__YData
+    @regression_method()
+    @init_check('_Brain__E_knn')
+    @data_transform()
+    def predict_knn_radius_data(self, x, weighted=False, radius=None):
+        distances, indices = self.__knn.radius_neighbors(x, radius)
+
+        y = self.__y_data
         if y.ndim == 1:
             y = y.reshape((-1, 1))
 
         if not weighted:
-            y_pred = np.array([np.mean(y[index, :], axis=0)
-                               for index in indeces])
+            y_pred = array([mean(y[index, :], axis=0)
+                            for index in indices])
         else:
             weights = [weights_from_distances(distance) for distance in distances]
-            y_pred = np.array([(np.average(y[index, :], axis=0,
-                                           weights=weights[i]))
-                               for (i, index) in enumerate(indeces)])
-        if self.__YData.ndim == 1:
+            y_pred = array([(average(y[index, :], axis=0,
+                                     weights=weights[i]))
+                            for (i, index) in enumerate(indices)])
+        if self.__y_data.ndim == 1:
             y_pred = y_pred.ravel()
         if len(y_pred) is 1:
             y_pred = y_pred[0]
 
         return y_pred
 
-    # Support Vector Machine
-    @data_transform()
-    def predict_SVM(self, X, weighted=False):
+    """NEAREST NEIGHBORS END"""
+
+    """SVM START"""
+
+    def init_svm(self, model=SVM.Regular, **model_params):
+
+        if (not self.__classification) and (not self.__regression):
+            raise AttributeError('SVM is a supervised method, must provide either regression or classification data')
+
+        print("\nStarting Support Vector Machine")
+        if model is SVM.Regular:
+            param_grid = handle_auto(model_params, [['C', 1.0],
+                                                    ['epsilon', 0.1],
+                                                    ['kernel', 'rbf'],
+                                                    ['degree', 3],
+                                                    ['gamma', 0.0],
+                                                    ['coef0', 0.0]])
+
+            if self.__regression:
+                self.__svm_reg = grid_search.GridSearchCV(model[1](), param_grid.copy())
+
+            if self.__classification:
+                del param_grid['epsilon']
+                self.__svm_class = grid_search.GridSearchCV(model[0](), param_grid.copy())
+
+        if model is SVM.Linear:
+            param_grid = handle_auto(model_params, [['C', 1.0],
+                                                    ['epsilon', 0.1]])
+            if self.__regression:
+                self.__svm_reg = grid_search.GridSearchCV(model[1](), param_grid.copy())
+
+            if self.__classification:
+                del param_grid['epsilon']
+                self.__svm_class = grid_search.GridSearchCV(model[0](), param_grid.copy())
+
+        if model is SVM.Nu:
+            param_grid = handle_auto(model_params, [['C', 1.0],
+                                                    ['nu', 0.5],
+                                                    ['kernel', 'rbf'],
+                                                    ['degree', 3],
+                                                    ['gamma', 0.0],
+                                                    ['coef0', 0.0]])
+
+            if self.__regression:
+                self.__svm_reg = grid_search.GridSearchCV(model[1](), param_grid.copy())
+
+            if self.__classification:
+                del param_grid['C']
+                self.__svm_class = grid_search.GridSearchCV(model[0](), param_grid.copy())
+
+        if self.__regression:
+            t0 = time()
+            self.__svm_reg = self.__svm_reg.fit(self.__x_data, self.__y_data).best_estimator_
+            t1 = time()
+
+            print('Time to complete SVM Regression was:\t%.2fs' % (t1 - t0))
+            if self.__verbose:
+                print(self.__svm_reg)
+
+        if self.__classification:
+            t0 = time()
+            self.__svm_class = self.__svm_class.fit(self.__x_data, self.__y_labels).best_estimator_
+            self.__svm_class_weighted = copy(self.__svm_class)
+            self.__svm_class_weighted.class_weight = 'auto'
+            self.__svm_class_weighted.fit(self.__x_data, self.__y_labels)
+            t1 = time()
+
+            self.__svm_labels = self.__svm_class.predict(self.__x_data)
+            self.__svm_labels_weighted = self.__svm_class_weighted.predict(self.__x_data)
+
+            print('Time to complete SVM Classification was:\t%.2fs' % (t1 - t0))
+            if self.__verbose:
+                print(self.__svm_class)
+        self.__svm_params = (model, model_params)
+        self.__E_svm = True
+        return True
+
+    # Support Vector Machine Get Methods
+    @init_check('_Brain__E_svm')
+    def get_svm_labels(self, weighted=False):
         if weighted:
-            prediction = self.__svmWeighted.predict(X)
+            return self.__svm_labels_weighted
+        return self.__svm_labels
+
+    @init_check('_Brain__E_svm')
+    def get_svm_group(self, label, weighted=False):
+        if weighted:
+            return self.__x_data[self.__svm_labels_weighted == label]
+        return self.__x_data[self.__svm_labels == label]
+
+    @regression_method()
+    @init_check('_Brain__E_svm')
+    def get_svm_group(self, label, weighted=False):
+        if weighted:
+            return self.__y_data[self.__svm_labels_weighted == label]
+        return self.__y_data[self.__svm_labels == label]
+
+    # Support Vector Machine
+    @classification_method()
+    @init_check('_Brain__E_svm')
+    @data_transform()
+    def predict_svm_class(self, x, weighted=False):
+        if weighted:
+            prediction = self.__svm_class_weighted.predict(x)
         else:
-            prediction = self.__svm.predict(X)
+            prediction = self.__svm_class.predict(x)
+
         if len(prediction) is 1:
             prediction = prediction[0]
         return prediction
-    def predict_SVM_data(self, X, weighted=False, average=True):
-        prediction = self.predict_SVM(X, weighted)
-        if type(prediction) is np.ndarray:
-            getData = self.get_SVM_data
-            if average:
-                average = self.__averageFunction
-                return np.array([average(getData(pred, weighted), 0) for pred in prediction])
-            return np.array([getData(pred, weighted) for pred in prediction])
-        if average:
-            return self.__averageFunction(self.get_SVM_data(prediction, weighted), 0)
-        return self.get_SVM_data(prediction, weighted)
 
-    # Gaussian Mixture
+    @regression_method()
+    @init_check('_Brain__E_svm')
     @data_transform()
-    def predict_gaussian(self, X, probability=False):
-        if len(np.shape(X)) is 1:
-            X = [X]
-        if probability:
-            return self.__gmm.predict_proba(X)
-        prediction = self.__gmm.predict(X)
+    def predict_svm_data(self, x):
+        prediction = self.__svm_reg.predict(x)
         if len(prediction) is 1:
             prediction = prediction[0]
         return prediction
-    def predict_gaussian_data(self, X, average=True):
-        prediction = self.predict_gaussian(X)
-        if type(prediction) is np.ndarray:
-            getData = self.get_gaussian_data
-            if average:
-                average = self.__averageFunction
-                return np.array([average(getData(pred), 0) for pred in prediction])
-            return np.array([getData(pred) for pred in prediction])
-        if average:
-            return self.__averageFunction(self.get_gaussian_data(prediction), 0)
-        return self.get_gaussian_data(prediction)
 
-    # Neural Network
+    """SVM END"""
+
+    """GMM START"""
+
+    def init_gmm(self, model=GMM.REGULAR, **model_params):
+        print('\nStart Gaussian Mixture Model')
+
+        n_components = handle_required(model_params, ['n_components'])
+
+        covariance_type, n_iter, n_init, params, init_params = handle_optional(model_params,
+                                                                               [['covariance_type', 'diag'],
+                                                                                ['n_iter', 100],
+                                                                                ['n_init', 1],
+                                                                                ['params', 'wmc'],
+                                                                                ['init_params', 'wmc']])
+
+        if model is GMM.REGULAR:
+            self.__gmm = model(n_components=n_components, covariance_type=covariance_type, n_iter=n_iter, n_init=n_init,
+                               params=params, init_params=init_params)
+
+        if (model is GMM.VARIATIONAL) or (model is GMM.VARIATIONAL_INFINITE):
+            alpha = handle_optional(model_params, [['alpha', 1]])
+
+            self.__gmm = model(n_components=n_components, covariance_type=covariance_type, n_iter=n_iter, n_init=n_init,
+                               params=params, init_params=init_params, alpha=alpha)
+
+        t0 = time()
+        self.__gmm.fit(self.__x_data)
+        t1 = time()
+
+        self.__gmm_params = (model, model_params)
+        self.__gmm_labels = self.__gmm.predict(self.__x_data)
+
+        self.__E_gmm = True
+        print('Time to complete Gaussian Mixture Model was:\t%.2fs' % (t1 - t0))
+        if self.__verbose:
+            print(self.__gmm)
+        return True
+
+    @init_check('_Brain__E_gmm')
     @data_transform()
-    def predict_neural_net(self, X):
-        prediction = self.__neuralNet.predict(X)
+    def predict_gmm_class(self, x):
+        prediction = self.__gmm.predict(x)
+
         if len(prediction) is 1:
             prediction = prediction[0]
         return prediction
-    def predict_neural_net_data(self, X, average=True):
-        prediction = self.predict_neural_net(X)
-        if type(prediction) is np.ndarray:
-            getData = self.get_neural_net_data
-            if average:
-                average = self.__averageFunction
-                return np.array([average(getData(pred), 0) for pred in prediction])
-            return np.array([getData(pred) for pred in prediction])
-        if average:
-            return self.__averageFunction(self.get_neural_net_data(prediction), 0)
-        return self.get_neural_net_data(prediction)
 
-    # Naive Bayes
+    @init_check('_Brain__E_gmm')
     @data_transform()
-    def predict_naive(self, X, probability=False):
-        if probability:
-            return self.__naive.predict_proba(X)
-        prediction = self.__naive.predict(X)
-        if len(prediction) is 1:
-            prediction = prediction[0]
-        return prediction
-    def predict_naive_data(self, X, average=True):
-        prediction = self.predict_naive(X)
-        if type(prediction) is np.ndarray:
-            getData = self.get_naive_data
-            if average:
-                average = self.__averageFunction
-                return np.array([average(getData(pred), 0) for pred in prediction])
-            return np.array([getData(pred) for pred in prediction])
-        if average:
-            return self.__averageFunction(self.get_naive_data(prediction), 0)
-        return self.get_naive_data(prediction)
+    def predict_gmm_fuzzy(self, x):
+        return self.__gmm.predict_proba(x)
 
-    # Semi Supervised
+    """GMM END"""
+
+
+    """Naive Bayes START"""
+
+    def init_naive_bayes(self, model=NAIVE_BAYES.REGULAR, **model_params):
+        print('\nStart Naive Bayes')
+
+        if model is NAIVE_BAYES.REGULAR:
+            self.__naive_bayes = model()
+        if model is NAIVE_BAYES.MULTINOMIAL:
+            alpha = handle_optional(model_params, [['alpha', 1]])
+            self.__naive_bayes = model(alpha=alpha)
+        if model is NAIVE_BAYES.BERNOULLI:
+            alpha, binarize = handle_optional(model_params, [['alpha', 1],
+                                                             ['binarize', 0.0]])
+            self.__naive_bayes = model(alpha=alpha, binarize=binarize)
+
+        t0 = time()
+        self.__naive_bayes.fit(self.__x_data, self.__y_labels)
+        self.__naive_bayes_labels = self.__naive_bayes.predict(self.__x_data)
+        t1 = time()
+
+        self.__naive_bayes_params = (model, model_params)
+
+        self.__E_nb = True
+        print('Time to complete Naive Bayes was:\t%.2fs' % (t1 - t0))
+        if self.__verbose:
+            print(self.__naive_bayes)
+        return True
+
+
+    @init_check('_Brain__E_nb')
     @data_transform()
-    def predict_semi_supervised(self, X, probability=False):
-        if probability:
-            return self.__semiSupervised.predict_proba(X)
-        prediction = self.__semiSupervised.predict(X)
+    def predict_naive_bayes_class(self, x):
+        prediction = self.__naive_bayes.predict(x)
+
         if len(prediction) is 1:
             prediction = prediction[0]
         return prediction
-    def predict_semi_supervised_data(self, X, average=True):
-        prediction = self.predict_semi_supervised(X)
-        if type(prediction) is np.ndarray:
-            getData = self.get_semi_supervised_data
-            if average:
-                average = self.__averageFunction
-                return np.array([average(getData(pred), 0) for pred in prediction])
-            return np.array([getData(pred) for pred in prediction])
-        if average:
-            return self.__averageFunction(self.get_semi_supervised_data(prediction), 0)
-        return self.get_semi_supervised_data(prediction)
 
-    # Multi
-    def predict_all(self, X, dataOnly=False, extra=False, nNeighbors=-1):
-        if len(np.shape(X)) is 2:
-            predict = self.predict_all
-            prediction = np.array([predict(data, dataOnly, extra, nNeighbors) for data in X])
-            return prediction
+    @init_check('_Brain__E_nb')
+    @data_transform()
+    def predict_naive_bayes_fuzzy(self, x):
+        return self.__naive_bayes.predict_proba(x)
+
+    """Naive Bayes END"""
+
+    @data_transform()
+    def predict_all_class(self, x, raw=False, extra=False):
+        if len(shape(x)) is 2:
+            predict = self.predict_all_class
+            return array([predict(data, raw, extra) for data in x])
 
         output = {}
 
-        if self.__clusterEnabled:
-            output['Cluster'] = self.predict_cluster(X)
-        if self.__knnEnabled:
-            output['Unweighted Nearest Neighbors'] = self.predict_nearest_neighbors(X)
-            output['Weighted Nearest Neighbors'] = self.predict_nearest_neighbors(X, True)
+        if self.__E_cluster:
+            output['Cluster'] = self.predict_cluster_class(x)
+
+        if self.__E_knn:
+            output['Unweighted Nearest Neighbors'] = self.predict_knn_nearest_class(x)
+            output['Weighted Nearest Neighbors'] = self.predict_knn_nearest_class(x, True)
             if extra:
-                output['Unweighted Radius Neighbors'] = self.predict_radius_neighbors(X)
-                output['Weighted Radius Neighbors'] = self.predict_radius_neighbors(X, True)
-        if self.__svmEnabled:
-            output['Unweighted SVM'] = self.predict_SVM(X, False)
-            output['Weighted SVM'] = self.predict_SVM(X, True)
-        if self.__gaussianEnabled:
-            output['Gaussian Mixture'] = self.predict_gaussian(X)
-        if self.__neuralNetEnabled:
-            output['Neural Network'] = self.predict_neural_net(X)
-        if self.__naiveEnabled:
-            output['Naive Bayes'] = self.predict_naive(X)
-        if self.__semiSupervisedEnabled:
-            output['SemiSupervised'] = self.predict_semi_supervised(X)
+                output['Unweighted Radius Neighbors'] = self.predict_knn_radius_class(x)
+                output['Weighted Radius Neighbors'] = self.predict_knn_radius_class(x, True)
+
+        if self.__E_svm:
+            output['Unweighted SVM'] = self.predict_svm_class(x, False)
+            output['Weighted SVM'] = self.predict_svm_class(x, True)
+
+        if self.__E_gmm:
+            output['Gaussian Mixture'] = self.predict_gmm_class(x)
+
+        if self.__E_nb:
+            output['Naive Bayes'] = self.predict_naive_bayes_class(x)
+
         output = oDict(sorted(output.items()))
-        if dataOnly:
-            return get_dict_item(output)
+
+        if raw:
+            return get_dict_values(output)
         return output
-    def predict_all_data(self, X, dataOnly=False, extra=False, nNeighbors=-1):
-        if len(np.shape(X)) is 2:
-            predict = self.predict_all_data
-            prediction = np.array([predict(data, dataOnly, extra, nNeighbors) for data in X])
-            return prediction
 
-        output = {}
-
-        if self.__clusterEnabled:
-            output['Unweighted Cluster'] = self.predict_cluster_data(X, False)
-            if extra:
-                if self.get_cluster_type() is MODEL.KMean:
-                    output['Weighted Cluster'] = self.predict_cluster_data(X, True)
-                if self.get_cluster_type() is MODEL.MiniBatch:
-                    output['Weighted Cluster'] = self.predict_cluster_data(X, True)
-
-        if self.__knnEnabled:
-            output['Unweighted Nearest Neighbors'] = self.predict_nearest_neighbors_data(X)
-            output['Weighted Nearest Neighbors'] = self.predict_nearest_neighbors_data(X, True)
-            if extra:
-                output['Unweighted Radius Neighbors'] = self.predict_radius_neighbors_data(X)
-                output['Weighted Radius Neighbors'] = self.predict_radius_neighbors_data(X, True)
-
-        if self.__svmEnabled:
-            output['Unweighted SVM'] = self.predict_SVM_data(X, False)
-            output['Weighted SVM'] = self.predict_SVM_data(X, True)
-        if self.__gaussianEnabled:
-            output['Gaussian Mixture'] = self.predict_gaussian_data(X)
-            if extra:
-                output['Gaussian Mixture Probability'] = self.predict_gaussian_data(X, True)
-        if self.__neuralNetEnabled:
-            output['Neural Network'] = self.predict_neural_net_data(X)
-        if self.__naiveEnabled:
-            output['Naive Bayes'] = self.predict_naive_data(X)
-            if extra:
-                output['Naive Bayes Probability'] = self.predict_naive(X, True)
-        if self.__semiSupervisedEnabled:
-            output['SemiSupervised'] = self.predict_semi_supervised_data(X)
-            if extra:
-                output['SemiSupervised Probability'] = self.predict_semi_supervised(X, True)
-        output = oDict(sorted(output.items()))
-        if dataOnly:
-            return get_dict_item(output)
-        return output
-    def predict_all_data_weighted(self, X):
-        if self.__weights is None:
-            print("Please run \'calculateWeights\' first")
-        else:
-            if len(np.shape(X)) == 2:
-                weights = self.__weights
-                combine = self.combine_weighted_data
-                predictions = self.predict_all_data(X, True)
-                final = [combine(prediction, weights) for prediction in predictions]
-                return final
-            else:
-                prediction = self.predict_all_data(X, True)
-                final = self.combine_weighted_data(prediction, self.__weights)
-                return final
-    @staticmethod
-    def combine_weighted_data(all_predictions, weights):
-        weights = np.array(weights)
-        total = np.sum(weights)
-        weights /= total
-        return weighted_average(np.array([all_predictions, weights]))
-
-    # Update Methods
-    def update_data(self, newX, newY=None, newLabels=None, reFit=False):
-        # Start: Error Handling
+    @data_transform()
+    def predict_all_class_weighted(self, x, highest=False):
         try:
-            if len(newX[0]) != self.__nElements:
-                print('Error! Wrong data size. Length:\t%i Expected:\t%i' % (len(newX[0]), self.__nElements))
+            self.__weights_class
+        except AttributeError:
+            print('Must initialize weights first by running calculate_weights()')
+            return
+
+        if len(shape(x)) is 2:
+            predict = self.predict_all_class_weighted
+            return array([predict(data, highest) for data in x])
+
+        pred = self.predict_all_class(x, True)
+        weights = self.__weights_class
+        pred = swapaxes(vstack((pred, weights)), 0, 1)
+        pred = pred[pred[:, 1] != 0]
+        pred = array([[n, pred[pred[:, 0] == n][:, 1].sum()] for n in unique(pred[:, 0])])
+
+        if highest:
+            return pred[pred[:, 1] == pred[:, 1].max()][0][0]
+
+        return pred
+
+    @regression_method()
+    @data_transform()
+    def predict_all_data(self, x, raw=False, extra=False):
+        if len(shape(x)) is 2:
+            predict = self.predict_all_data
+            return array([predict(data, raw, extra) for data in x])
+
+        output = {}
+
+        if self.__E_cluster:
+            output['Cluster'] = self.predict_cluster_data(x)
+
+        if self.__E_knn:
+            output['Unweighted Nearest Neighbors'] = self.predict_knn_nearest_data(x)
+            output['Weighted Nearest Neighbors'] = self.predict_knn_nearest_data(x, True)
+            if extra:
+                output['Unweighted Radius Neighbors'] = self.predict_knn_radius_data(x)
+                output['Weighted Radius Neighbors'] = self.predict_knn_radius_data(x, True)
+
+        if self.__E_svm:
+            output['SVM'] = self.predict_svm_data(x)
+
+        output = oDict(sorted(output.items()))
+
+        if raw:
+            return get_dict_values(output)
+        return output
+
+    @regression_method()
+    @data_transform()
+    def predict_all_data_weighted(self, x, average=False, highest=False):
+        try:
+            self.__weights_data
+        except AttributeError:
+            print('Must initialize weights first by running calculate_weights()')
+            return
+
+        if len(shape(x)) is 2:
+            predict = self.predict_all_data_weighted
+            return array([predict(data, highest) for data in x])
+
+        pred = self.predict_all_data(x, True)
+        weights = self.__weights_data
+        pred = swapaxes(vstack((pred, weights)), 0, 1)
+        pred = pred[pred[:, 1] != 0]
+        pred = array([[n, pred[pred[:, 0] == n][:, 1].sum()] for n in unique(pred[:, 0])])
+
+        if highest:
+            return pred[pred[:, 1] == pred[:, 1].max()][0][0]
+        if average:
+            pred = pred[:, 0] * pred[:, 1]
+            return pred.sum()
+
+        return pred
+
+    @classification_method()
+    @data_transform()
+    def __calculate_weights_class(self, x_test=None, y_test=None, cutoff=None):
+        if x_test is None:
+            x_test = self.__x_data
+        if y_test is None:
+            y_test = self.__y_labels
+
+        names = get_dict_key(self.predict_all_class(x_test[0]))
+        predictions = self.predict_all_class(x_test, True)
+        if len(predictions.shape) is 1:
+            predictions = array([predictions])
+        predictions = swapaxes(predictions, 0, 1)
+        predictions = array([metrics.accuracy_score(y_test, test) for test in predictions])
+        if cutoff is not None:
+            predictions[predictions < cutoff] = 0
+        predictions /= predictions.sum()
+        self.__weights_class = predictions
+
+        print_weights = vstack(predictions)
+        names = vstack(names)
+        pretty_weights = concatenate((names, print_weights), 1)
+        print('Classification Weights:\n' + str(pretty_weights))
+
+    @regression_method()
+    @data_transform()
+    def __calculate_weights_data(self, x_test=None, y_test=None, cutoff=None, k=500, p=3):
+        if x_test is None:
+            x_test = self.__x_data
+        if y_test is None:
+            y_test = self.__y_data
+
+        names = get_dict_key(self.predict_all_data(x_test[0]))
+        predictions = self.predict_all_data(x_test, True)
+        if len(predictions.shape) is 1:
+            predictions = array([predictions])
+        predictions = swapaxes(predictions, 0, 1)
+        predictions -= y_test
+        predictions = abs(predictions)
+        predictions **= p
+        predictions *= k
+        predictions += 1
+        predictions = 1 / predictions
+        predictions = mean(predictions, 1)
+        if cutoff is not None:
+            predictions[predictions < cutoff] = 0
+        predictions /= predictions.sum()
+        self.__weights_data = predictions
+
+        print_weights = vstack(predictions)
+        names = vstack(names)
+        pretty_weights = concatenate((names, print_weights), 1)
+        print('Regressions Weights:\n' + str(pretty_weights))
+
+    @data_transform()
+    def calculate_weights(self, x_test=None, y_test_class=None, y_test_data=None, cutoff=None, k=500, p=3):
+        """Calculates weights of results based on accuracy, returns a value from 0 - 1 for each value
+        Input test points and data. If blank, all data will be used.
+        Cuttoff: determines at which point will weight be turned to zero, number from 0 - 1
+        K: k constant for equation
+        p: Power of x """
+        if (not self.__classification) and (not self.__regression):
+            print('Weighted combination requires either regression or classification data')
+            return
+
+        if self.__classification:
+            self.__calculate_weights_class(x_test, y_test_class, cutoff)
+        if self.__regression:
+            self.__calculate_weights_data(x_test, y_test_data, cutoff, k, p)
+
+    def calculate_score_class(self, y_predicted, y_actual=None, score_type=None):
+        """Use this score calculator for more specific scores.
+        Use the METRIC enum to choose scoreType, or leave as 'all'"""
+        if y_actual is None:
+            try:
+                y_actual = self.__y_labels
+            except AttributeError:
+                print('Must provide classification data either when calling function or when making model')
                 return
-        except:
-            print('Input must be in a two dimensional array form')
-            return
-        if not check_data(newX):
-            return
-        # End: Error Handling
+        length = min([len(y_actual), len(y_predicted)])
+        if score_type is None:
+            score = metrics.classification_report(y_actual[:length], y_predicted[:length])
+            print(score)
+        else:
+            score = score_type(y_actual[:length], y_predicted[:length])
+            return score
 
-        self.__XData = np.concatenate((self.__XData, newX), 0)
-        if (self.__YData is not None) and (newY is not None):
-            self.__YData = np.concatenate((self.__YData, newY), 0)
-        if (self.__Labels is not None) and (newLabels is not None):
-            self.__Labels = np.concatenate((self.__Labels, newLabels), 0)
-        self.__nDataPoints += len(newX)
-        if reFit:
-            self.refit_models()
-    def refit_models(self):
-        t0 = time.time()
-        if self.__labelsPredicted:
-            if len(self.__YData) != len(self.__XData):
-                self.__YData = None
-            self.init_guess_labels(self.__guessHold[0], self.__guessHold[1], self.__guessHold[2], self.__guessHold[3])
-        if self.__clusterEnabled:
-            self.__model.fit(self.__XData)
-            self.__cluster_labels = self.__model.labels_
-            self.__modelAverages = None
-            if self.__YData is not None:
-                self.__calculate_centroid_averages()
-        if self.__knnEnabled:
-            self.__knn.fit(self.__XData)
-        if self.__svmEnabled:
-            ydata = self.__Labels
-            if (type(self.__svm) is svm.SVR) or (type(self.__svm) is svm.NuSVR):
-                ydata = self.__YData
-            self.__svm.fit(self.__XData, ydata)
-            self.__svmWeighted.fit(self.__XData, ydata)
-            self.__svmLabels = np.array(self.__svm.predict(self.__XData))
-            self.__svmWeightedLabels = np.array(self.__svmWeighted.predict(self.__XData))
-        if self.__naiveEnabled:
-            self.__naive.fit(self.__XData, self.__Labels)
-            self.__naiveLabels = np.array(self.__naive.predict(self.__XData))
-        if self.__semiSupervisedEnabled:
-            self.__semiSupervised.fit(self.__XData, self.__Labels)
-            self.__semiSupervisedLabels = np.array(self.__semiSupervised.predict(self.__XData))
-        if self.__neuralNetEnabled:
-            self.__neuralNet.fit(self.__XData, self.__Labels)
-            self.__neuralNetLabels = np.array(self.__neuralNet.predict(self.__XData))
-        if self.__gaussianEnabled:
-            self.__gmm.fit(self.__XData)
-            self.__gmmLabels = np.array(self.__gmm.predict(self.__XData))
-        t1 = time.time()
-        print('Time to complete ReFit was:\t%.2fs' % (t1 - t0))
-
-    # Misc Methods
-    @staticmethod
-    def calculate_error(yPredicted, yActual, k=500, p=3, c=1):
+    def calculate_score_data(self, y_predicted, y_actual=None, k=500, p=3, c=1):
         """Logistic Error Function, Use for general purpose
         Returns a value from (0 - c], Higher Values are better"""
-        score = np.array(yPredicted)
-        score -= yActual
-        score = np.abs(score)
+        if y_actual is None:
+            try:
+                y_actual = self.__y_data
+            except AttributeError:
+                print('Must provide regression data either when calling function or when making model')
+                return
+        score = array(y_predicted)
+        score -= y_actual
+        score = abs(score)
         score **= p
         score *= k
         score += 1
         score = c / score
-        score = np.mean(score)
+        score = mean(score)
         return score
-    def calculate_score(self, yPredicted, yActual=None, scoreType='all'):
-        """Use this score calculator for more specific scores.
-        Use the METRIC enum to choose scoreType, or leave as 'all'"""
-        if yActual is None:
-            yActual = self.__YData
-        length1 = len(yActual)
-        length2 = len(yPredicted)
-        length = np.min([length1, length2])
-        if scoreType == 'all':
-            score = metrics.classification_report(yActual[:length], yPredicted[:length])
-            print(score)
-        else:
-            # noinspection PyCallingNonCallable
-            score = scoreType(yActual[:length], yPredicted[:length])
-            return score
 
-    # Don't you dare touch this, This is some black voodoo right here
-    def __auto_calculate_params(self, method, ranges, gridType=AUTO.Grid):
-        if method is CLUSTER_METHOD.NeuralNet:
-            if gridType is AUTO.Grid:
-                grid = gridType(self.__neuralNet, {'network__learning_rate': ranges[0], 'network__n_iter': ranges[1],
-                                                   'estimator__C': ranges[2]})
-            else:
-                grid = gridType(self.__neuralNet, ['network__learning_rate', 'network__n_iter', 'estimator__C'], ranges)
-            grid.fit(self.__XData, self.__Labels)
-            print('\tAutomatic Fitting has been completed for Neural Net.\n\tBest Score: ' + str(grid.best_score_))
-            print('\tBest Parameters: ' + str(grid.best_params_))
-            self.__neuralNet = grid.best_estimator_
-
-        if method is CLUSTER_METHOD.SupportVector:
-            ydata = self.__Labels
-            if type(self.__svm) is svm.LinearSVC:
-                grid = gridType(self.__svm, {'C': ranges[0], 'loss': ['l1', 'l2']})
-            elif type(self.__svm) is svm.SVC:
-                grid = gridType(self.__svm, {'C': ranges[0], 'kernel': ['linear', 'poly', 'rbf', 'sigmoid']})
-            elif type(self.__svm) is svm.NuSVC:
-                grid = gridType(self.__svm, {'nu': ranges[0], 'kernel': ['linear', 'poly', 'rbf', 'sigmoid']})
-            elif type(self.__svm) is svm.SVR:
-                grid = gridType(self.__svm,
-                                {'C': ranges[0], 'epsilon': ranges[1], 'kernel': ['linear', 'poly', 'rbf', 'sigmoid']})
-                ydata = self.__YData
-            elif type(self.__svm) is svm.NuSVR:
-                grid = gridType(self.__svm,
-                                {'C': ranges[0], 'nu': ranges[1], 'kernel': ['linear', 'poly', 'rbf', 'sigmoid']})
-                ydata = self.__YData
-            grid.fit(self.__XData, ydata)
-            print('\tAutomatic Fitting has been completed for Support Vector Machine.\n\tBest Score: ' + str(
-                grid.best_score_))
-            print('\tBest Parameters: ' + str(grid.best_params_))
-            self.__svm = grid.best_estimator_
-
-        if method is CLUSTER_METHOD.Gaussian:
-            def predict_gaussian_data_temp(brain, X, average=True):
-                prediction = brain.__gmm.predict(X)
-                if type(prediction) is np.ndarray:
-                    getData = brain.get_gaussian_data
-                    if average:
-                        average = brain.__averageFunction
-                        return np.array([average(getData(pred), 0) for pred in prediction])
-                    return np.array([getData(pred) for pred in prediction])
-                if average:
-                    return brain.__averageFunction(brain.get_gaussian_data(prediction), 0)
-                return brain.get_gaussian_data(prediction)
-
-            xTrain, xTest, yTrain, yTest = cross_validation.train_test_split(self.__XData, self.__YData, test_size=0.25)
-            if self.__gmmType is mixture.GMM:
-                grid = grid_search.ParameterGrid(
-                    {'n_components': ranges[0], 'covariance_type': ranges[1], 'min_covar': ranges[2],
-                     'tol': ranges[3], 'n_iter': ranges[4]})
-            if self.__gmmType is mixture.DPGMM:
-                grid = grid_search.ParameterGrid(
-                    {'n_components': ranges[0], 'covariance_type': ranges[1], 'alpha': ranges[2], 'tol': ranges[3],
-                     'n_iter': ranges[4]})
-            grid = np.array(list(grid))
-
-            GMM = mixture.GMM
-            DPGMM = mixture.DPGMM
-            predictData = predict_gaussian_data_temp
-            scoreCalc = Brain.calculate_error
-            gmmType = self.__gmmType
-
-            bestScore = 0
-            bestParams = None
-            bestModel = None
-            for param in grid:
-                if gmmType is GMM:
-                    self.__gmm = GMM(param['n_components'], param['covariance_type'], tol=param['tol'],
-                                     min_covar=param['min_covar'], n_iter=param['n_iter'])
-                if gmmType is DPGMM:
-                    self.__gmm = DPGMM(param['n_components'], param['covariance_type'], tol=param['tol'],
-                                       alpha=param['alpha'], n_iter=param['n_iter'])
-                self.__gmm.fit(self.__XData)
-                self.__gmmLabels = np.array(self.__gmm.predict(self.__XData))
-                yPred = predictData(self, xTest)
-                score = scoreCalc(yPred, yTest)
-                if score > bestScore:
-                    bestScore = score
-                    bestParams = param
-                    bestModel = self.__gmm
-            print('\tAutomatic Fitting has been completed for Gaussian Mixture.\n\tBest Score: ' + str(bestScore))
-            print('\tBest Parameters: ' + str(bestParams))
-            self.__gmm = bestModel
-
-        if method is CLUSTER_METHOD.Cluster:  # Not Working Yet
-            def predict_cluster_data_temp(brain, X, weighted=False, average=True):
-                prediction = brain.__model.predict(X)
-                if prediction is None:
-                    return None
-                if type(prediction) is np.ndarray:
-                    if weighted:
-                        distance = brain.__get_distances
-                        getWeights = weights_from_distances
-                        weightedAve = weighted_average
-                        clusterAverages = brain.__modelAverages
-                        if average:
-                            return np.array(
-                                [weightedAve([clusterAverages, getWeights(distance(pred), 3, False)]) for pred in X])
-                        return np.array([[clusterAverages, getWeights(distance(pred), 3, False)] for pred in X])
-                    getData = brain.get_cluster_data
-                    if average:
-                        average = brain.__averageFunction
-                        return np.array([average(getData(pred), 0) for pred in prediction])
-                    return np.array([getData(pred) for pred in prediction])
-
-                if weighted:
-                    data = np.array([brain.__modelAverages, weights_from_distances(brain.__get_distances(X), 3, False)])
-                    if average:
-                        return weighted_average(data)
-                    return data
-                if average:
-                    return brain.__averageFunction(brain.get_cluster_data(prediction), 0)
-                return brain.get_cluster_data(prediction)
-
-            xTrain, xTest, yTrain, yTest = cross_validation.train_test_split(self.__XData, self.__YData, test_size=0.25)
-            AffProp = cluster.AffinityPropagation
-            MShift = cluster.MeanShift
-            DBScan = cluster.DBSCAN
-            modelType = self.get_cluster_type()
-            predictData = predict_cluster_data_temp
-            scoreCalc = Brain.calculate_error
-
-            if modelType is AffProp:
-                grid = grid_search.ParameterGrid({'damping': np.arange(0.5, 1, 0.05)})
-            if modelType is MShift:
-                grid = grid_search.ParameterGrid({'bandwidth': ranges[0], 'min_bin_freq': ranges[1]})
-            if modelType is DBScan:
-                grid = grid_search.ParameterGrid({'eps': ranges[0], 'min_samples': ranges[1]})
-            grid = np.array(list(grid))
-
-            bestScore = 0
-            bestParams = None
-            bestModel = None
-            for param in grid:
-                if modelType is AffProp:
-                    self.__model = AffProp(param['damping'])
-                if modelType is MShift:
-                    self.__model = MShift(param['bandwidth'], min_bin_freq=param['min_bin_freq'])
-                if modelType is DBScan:
-                    self.__model = DBScan(param['eps'], param['min_samples'])
-                self.__model.fit(self.__XData)
-                self.__cluster_labels = self.__model.labels_
-                yPred = predictData(self, xTest)
-                score = scoreCalc(yPred, yTest)
-                if score > bestScore:
-                    bestScore = score
-                    bestParams = param
-                    bestModel = self.__model
-            print(
-                '\tAutomatic Fitting has been completed for ' + self.__modelType + '.\n\tBest Score: ' + str(bestScore))
-            print('\tBest Parameters: ' + str(bestParams))
-            self.__model = bestModel
-
-    def plot_data(self, method=CLUSTER_METHOD.Nothing, axis=(0, 1), axisNames=("Axis1", "Axis2", "Axis3"), usePCA=False):
+    def plot_class(self, method=None, axis=(0, 1), axis_names=("Axis1", "Axis2", "Axis3"), pca=False):
         """Use METHOD enum to choose method for coloring data.
         Set axis to a an array of the axis numbers (starting from 0) or to 'random'
-            You can set the axis varaible with either 2 or 3 axes
+            You can set the axis variable with either 2 or 3 axes
         This method can only be used if your data contains at least 2 axes
-        setting usePCA to true is only necesaary when your data has more axes than your desired graph type"""
+        setting usePCA to true is only necessary when your data has more axes than your desired graph type"""
 
-        colors = np.array([x for x in 'bgrcmykbgrcmykbgrcmykbgrcmyk'])
-        colors = np.hstack([colors] * 20)
+        colors = array([x for x in 'bgrcmykbgrcmykbgrcmykbgrcmyk'])
+        colors = hstack([colors] * 20)
 
-        if method is CLUSTER_METHOD.Cluster:
-            y_pred = self.__model.labels_.astype(np.int)
-        elif method is CLUSTER_METHOD.SupportVector:
-            y_pred = self.__svmLabels.astype(np.int)
-        elif method is CLUSTER_METHOD.NaiveBayes:
-            y_pred = self.__naiveLabels.astype(np.int)
-        elif method is CLUSTER_METHOD.SemiSupervised:
-            y_pred = self.__semiSupervisedLabels.astype(np.int)
-        elif method is CLUSTER_METHOD.Gaussian:
-            y_pred = self.__gmmLabels.astype(np.int)
-        elif method is CLUSTER_METHOD.NeuralNet:
-            y_pred = self.__neuralNetLabels.astype(np.int)
-        elif method is CLUSTER_METHOD.Actual:
-            y_pred = self.__Labels.astype(np.int)
-        else:
-            y_pred = np.zeros((self.__nDataPoints,), dtype=np.int)
+        if method is CLUSTER:
+            y_pred = self.__cluster.labels_.astype(int)
+        elif method is SVM:
+            y_pred = self.__svm_labels.astype(int)
+        elif method is GMM:
+            y_pred = self.__gmm_labels.astype(int)
+        elif method is NAIVE_BAYES:
+            y_pred = self.__naive_bayes_labels.astype(int)
+        elif method is None:
+            try:
+                y_pred = self.__y_labels.astype(int)
+            except AttributeError:
+                y_pred = zeros((self.__x_data.shape[0],), dtype=int)
 
         dim = len(axis)
+        if dim > 3 or dim < 2:
+            print('Number of axes must be either 2 or 3')
+            return
 
         axes = axis
-        if axis is 'random':
-            axes = np.random.permutation(np.array(range(len(self.__XData[0]))))[:dim]
+        # if axis is 'random':
+        #     axes = random.permutation(array(range(len(self.__XData[0]))))[:dim]
 
-        if usePCA:
-            data = decomposition.RandomizedPCA(dim).fit_transform(self.__XData)
+        if pca:
+            data = decomposition.RandomizedPCA(dim).fit_transform(self.__x_data)
         else:
-            data = self.__XData
+            data = self.__x_data
 
-        xAxis = data[:, axes[0]]
-        yAxis = data[:, axes[1]]
+        x_axis = data[:, axes[0]]
+        y_axis = data[:, axes[1]]
         if dim == 3:
-            zAxis = data[:, axes[2]]
+            z_axis = data[:, axes[2]]
 
-        xMin = np.min(xAxis)
-        xMax = np.max(xAxis)
-        yMin = np.min(yAxis)
-        yMax = np.max(yAxis)
+        x_min = min(x_axis)
+        x_max = max(x_axis)
+        y_min = min(y_axis)
+        y_max = max(y_axis)
         if dim == 3:
-            zMin = np.min(zAxis)
-            zMax = np.max(zAxis)
+            z_min = min(z_axis)
+            z_max = max(z_axis)
 
         fig = plt.figure()
 
         if dim == 2:
-            plt.scatter(xAxis, yAxis, color=colors[y_pred].tolist(), s=15)
+            plt.scatter(x_axis, y_axis, color=colors[y_pred].tolist(), s=15)
 
             # if method is METHOD.Cluster:
             # if hasattr(self.__model, 'cluster_centers_'):
@@ -1374,16 +1121,19 @@ class Brain:
             #            centers = decomposition.PCA(dim).transform(centers)
             #        center_colors = colors[:len(centers)]
             #        plt.scatter(centers[:, 0], centers[:, 1], s=100, c=center_colors)
-            plt.xlim(xMin - (0.1 * xMin), xMax + (0.1 * xMax))
-            plt.ylim(yMin - (0.1 * yMin), yMax + (0.1 * yMax))
+            plt.xlim(x_min - (0.1 * x_min), x_max + (0.1 * x_max))
+            plt.ylim(y_min - (0.1 * y_min), y_max + (0.1 * y_max))
             plt.xticks(())
             plt.yticks(())
-            plt.xlabel(axisNames[0])
-            plt.ylabel(axisNames[1])
-            plt.suptitle(CLUSTER_METHOD.getName(method))
+            plt.xlabel(axis_names[0])
+            plt.ylabel(axis_names[1])
+            try:
+                plt.suptitle(method.__name__)
+            except:
+                pass
         else:
             ax = Axes3D(fig)
-            ax.scatter(xAxis, yAxis, zAxis, c=colors[y_pred].tolist(), cmap=plt.cm.Paired)
+            ax.scatter(x_axis, y_axis, z_axis, c=colors[y_pred].tolist(), cmap=plt.cm.Paired)
             # if method is METHOD.Cluster:
             # if hasattr(self.__model, 'cluster_centers_'):
             #        centers = self.__model.cluster_centers_
@@ -1391,69 +1141,197 @@ class Brain:
             #            centers = decomposition.PCA(dim).transform(centers)
             #        center_colors = colors[:len(centers)]
             #        ax.scatter(centers[:, axes[0]], centers[:, axes[1]], centers[:, axes[2]], c=center_colors, s=100)
-            ax.set_title(CLUSTER_METHOD.getName(method))
-            ax.set_xlabel(axisNames[0])
+            try:
+                ax.set_title(method.__name__)
+            except:
+                pass
+            ax.set_xlabel(axis_names[0])
             ax.w_xaxis.set_ticklabels([])
-            ax.set_ylabel(axisNames[1])
+            ax.set_ylabel(axis_names[1])
             ax.w_yaxis.set_ticklabels([])
-            ax.set_zlabel(axisNames[2])
+            ax.set_zlabel(axis_names[2])
             ax.w_zaxis.set_ticklabels([])
             ax.autoscale_view()
             ax.autoscale()
         plt.show()
-    def autoCalculateWeights(self, xTest=None, yActual=None, cutoff=None, k=500, p=3):
-        """Calculates weights of results based on accuracy, returns a value from 0 - 1 for each value
-        Input test points and data. If blank, all data will be used.
-        Cuttoff: determines at which point will weight be turned to zero, number from 0 - 1
-        K: k constant for equation
-        p: Power of x"""
-        if xTest is None:
-            xTest = self.__XData
-        if yActual is None:
-            yActual = self.__YData
-        names = get_dict_key(self.predict_all_data(xTest[0]))
-        predictions = [get_dict_item(self.predict_all_data(point)) for point in xTest]
-        predictions = np.array(predictions)
-        predictions = np.swapaxes(predictions, 0, 1)
-        predictions -= yActual
-        predictions = np.abs(predictions)
-        predictions **= p
-        predictions *= k
-        predictions += 1
-        predictions = 1 / predictions
-        predictions = self.__averageFunction(predictions, 1)
-        if cutoff is not None:
-            predictions[predictions <= cutoff] = 0
-        self.__weights = predictions
-        printWeights = np.vstack(predictions)
-        names = np.vstack(names)
-        prettyWeights = np.concatenate((names, printWeights), 1)
-        print('Weights:\n' + str(prettyWeights))
+
+    def plot_regression(self, x_data=None, real=None, predicted=None, axis=(0,), axis_names=("Axis1", "Axis2", "Axis3"), line=False):
+        """Use METHOD enum to choose method for coloring data.
+        Set axis to a an array of the axis numbers (starting from 0) or to 'random'
+            You can set the axis variable with either 2 or 3 axes
+        This method can only be used if your data contains at least 2 axes
+        setting usePCA to true is only necessary when your data has more axes than your desired graph type"""
+
+
+        dim = len(axis)
+        if dim > 2 or dim < 1:
+            print('Number of axes must be either 2 or 3')
+            return
+
+        axes = axis
+
+        if x_data is not None:
+            data = x_data
+        else:
+            data = self.__x_data
+
+        if real is not None:
+            y_data = real
+        else:
+            y_data = self.__y_data
+
+        x_axis = data[:, axes[0]]
+
+        if dim == 1:
+            y_axis = y_data
+        if dim == 2:
+            y_axis = data[:, axes[1]]
+            z_axis = y_data
+
+        x_min = min(x_axis)
+        x_max = max(x_axis)
+        y_min = min(y_axis)
+        y_max = max(y_axis)
+        if dim == 3:
+            z_min = min(z_axis)
+            z_max = max(z_axis)
+
+        fig = plt.figure()
+
+        if dim == 1:
+            if not line:
+                plt.scatter(x_axis, y_axis, s=15)
+                if predicted is not None:
+                    plt.scatter(x_axis, predicted, s=15, c='R')
+            else:
+                plt.scatter(x_axis, y_axis, s=15)
+                if predicted is not None:
+                    plt.scatter(x_axis, predicted, s=15, c='R')
+
+            plt.xlim(x_min - (0.1 * x_min), x_max + (0.1 * x_max))
+            plt.ylim(y_min - (0.1 * y_min), y_max + (0.1 * y_max))
+            plt.xticks(())
+            plt.yticks(())
+            plt.xlabel(axis_names[0])
+            plt.ylabel(axis_names[1])
+
+        else:
+            ax = Axes3D(fig)
+            ax.scatter(x_axis, y_axis, z_axis, cmap=plt.cm.Paired)
+            if predicted is not None:
+                ax.scatter(x_axis, y_axis, predicted, cmap=plt.cm.Paired, c='R')
+
+
+            ax.set_xlabel(axis_names[0])
+            ax.w_xaxis.set_ticklabels([])
+            ax.set_ylabel(axis_names[1])
+            ax.w_yaxis.set_ticklabels([])
+            ax.set_zlabel(axis_names[2])
+            ax.w_zaxis.set_ticklabels([])
+            ax.autoscale_view()
+            ax.autoscale()
+        plt.show()
+
+    def add_classification_data(self, labels):
+        if self.__classification:
+            print('You already have classification data, no need to add more!')
+            return
+        if len(labels) != self.__n_samples:
+            print('Length of labels and current X Data do not match.')
+            return
+
+        self.__y_labels = labels
+        self.__classification = True
+
+    def add_regression_data(self, data):
+        if self.__regression:
+            print('You already have regression data, no need to add more!')
+            return
+        if len(data) != self.__n_samples:
+            print('Length of data and current X Data do not match.')
+            return
+
+        self.__y_labels = data
+        self.__regression = True
+
+    @data_transform()
+    def update_data(self, new_x, new_labels=None, new_data=None, refit=False):
+        # Start: Error Handling
+        try:
+            if len(new_x[0]) != self.__n_features:
+                print('Error! Wrong data size. Length:\t%i Expected:\t%i' % (len(new_x[0]), self.__n_features))
+                return
+        except:
+            print('Input must be in a two dimensional array form')
+            return
+        # if not check_data(new_x):
+        #     return
+        # End: Error Handling
+
+        if self.__regression:
+            if new_data is not None:
+                self.__y_data = concatenate((self.__y_data, new_data), 0)
+            else:
+                print('Must update regression data along with x data.')
+                return
+
+        if self.__classification:
+            if new_labels is not None:
+                self.__y_labels = concatenate((self.__y_labels, new_labels), 0)
+            elif self.__E_est:
+                self.__classification = False
+            else:
+                print('Must update classification data along with x data.')
+                return
+
+        self.__x_data = concatenate((self.__x_data, new_x), 0)
+
+        if refit:
+            self.refit_models()
+
+    def refit_models(self):
+        print('Refitting models')
+        if self.__E_est:
+            self.init_estimate_labels(self.__est_params[0], **self.__est_params[1])
+        if self.__E_cluster:
+            self.init_clustering(self.__cluster_params[0], **self.__cluster_params[1])
+        if self.__E_knn:
+            self.init_neighbors(*self.__knn_params)
+        if self.__E_svm:
+            self.init_svm(self.__svm_params[0], **self.__svm_params[1])
+        if self.__E_gmm:
+            self.init_gmm(self.__gmm_params[0], **self.__gmm_params[1])
+        if self.__E_nb:
+            self.init_naive_bayes(self.__naive_bayes_params[0], **self.__naive_bayes_params[1])
+        print('Done Refitting')
+
+    def save_brain(self, file_path='', compress=True):
+        externals.joblib.dump(self, file_path, compress)
+        print('Successfully saved your brain in: %s' % file_path)
 
     @staticmethod
-    def speed_test(point, method, times=10000, reps=3):
-        """Times a a function from the api with a point."""
-        scores = []
-        for t in range(reps):
-            t0 = time.time()
-            for i in range(times):
-                method(point)
-            t1 = time.time()
-            scores.append(t1 - t0)
-        averageTime = np.mean(scores)
-        timePer = averageTime / times
-        units = 'Seconds'
-        if timePer < 0.5:
-            timePer *= 1000
-            units = 'MilliSeconds'
-        print('Average: %f Seconds\nTests: %i\nOperations per Test: %i\nAverage: %f %s per operation.' % (
-            averageTime, reps, times, timePer, units))
-    # Persistence
-    def save_brain(self, filePath='', compress=False):
-        externals.joblib.dump(self, filePath, compress)
-        print('Successfully saved framework in: ' + filePath)
-    @staticmethod
-    def load_brain(filePath):
-        framework = externals.joblib.load(filePath)
-        print('Successfully loaded framework from: ' + filePath)
+    def load_brain(file_path):
+        framework = externals.joblib.load(file_path)
+        print('Successfully loaded brain from: %s' % file_path)
         return framework
+
+# # import warnings
+# #
+# # warnings.filterwarnings('error')
+# #
+
+def main():
+    xData, yData = datasets.make_blobs(1000, 6, 5, random_state=0)
+    xTrain, xTest, yTrain, yTest = cross_validation.train_test_split(xData, yData, test_size=0.33, random_state=0)
+    brain = Brain(xTrain, y_labels=yTrain, verbose=True)
+    brain.init_data_transformation(TRANSFORMATION.Standardize(), TRANSFORMATION.PCA.RandomizedPCA())
+    brain.init_clustering(model=CLUSTER.MiniBatch, n_clusters=5)
+    brain.init_svm(model=SVM.Nu, nu=arange(0.1, 0.9, 0.1))
+    brain.init_gmm(n_components=5)
+    brain.init_neighbors()
+    brain.init_naive_bayes()
+    brain.predict_all_class(xTest[0])
+    brain.calculate_weights(xTest, yTest, cutoff=0.5)
+
+if __name__ == "__main__":
+    main()
