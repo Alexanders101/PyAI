@@ -25,7 +25,7 @@ many open-source and personal machine learning libraries.
 
 The main object in the library is the Brain class (PyAI.Brain). With it you access all of the features in the framework.
 
-brain = PyAI.Brain(x_data=data, y_labels=labels, y_data=reg_data)
+    brain = PyAI.Brain(x_data=data, y_labels=labels, y_data=reg_data)
 
 This brain object has 2 modes of operation: classification and regression.
 
@@ -54,5 +54,6 @@ Then you can apply any number of prediction methods in order to predict using th
     brain.predict_cluster_labels(test_data)
     brain.predict_svm_data(test_data)
 
-> The xxx must match on of the algorithms that you have initialized
-> The yyy can either be 'labels' or 'data' for classification and regression respectively  
+The xxx must match on of the algorithms that you have initialized
+
+The yyy can either be 'labels' or 'data' for classification and regression respectively  
