@@ -3,6 +3,8 @@ from numpy import *
 import numpy as np
 from math import e
 from decorator import decorator
+import warnings
+from inspect import getargspec
 
 
 def check_array(input):
@@ -116,6 +118,14 @@ def init_check(method):
 
     return checker
 
+class NoClassificationDataError(Exception):
+    pass
+
+
+class NoRegressionDataError(Exception):
+    pass
+
+
 
 def classification_method():
     @decorator
@@ -124,7 +134,7 @@ def classification_method():
         if getattr(self, method, False):
             return f(self, *args, **kwargs)
         else:
-            raise AttributeError(
+            raise NoClassificationDataError(
                 '\nREGRESSION DATA NOT PROVIDED'
                 '\nTrying to run: ' + str(f.__name__) + '()' +
                 '\nPlease provide classification data or run \'init_estimate_labels()\'first.')
@@ -138,7 +148,7 @@ def regression_method():
         if getattr(self, method, False):
             return f(self, *args, **kwargs)
         else:
-            raise AttributeError(
+            raise NoRegressionDataError(
                 '\nREGRESSION DATA NOT PROVIDED'
                 '\nTrying to run: ' + str(f.__name__) + '()' +
                 '\nPlease provide regression data first.')
@@ -178,40 +188,49 @@ def data_transform():
     return checker
 
 
-class missing_param_error(Exception):
+class missingParamError(Exception):
     def __init__(self, name):
         self.value = "Missing required parameter:\t'%s'" % (name)
     def __str__(self):
         return self.value
 
-def handle_optional(model_params, options = []):
+def handle_optional(model_params, options = [], verbose=False):
     params = []
     for key, value in options:
         try:
             curr = model_params[key]
-            print("'{}' is set to modified value of: {}".format(key, curr))
+            if verbose:
+                print("'{}' is set to modified value: {}".format(key, repr(curr)))
         except KeyError:
             curr = value
             # print("'{}' is set to default value of: {}".format(key, value))
         params.append(curr)
+    extra = ([extra for extra in model_params.keys() 
+              if (extra not in [key[0] for key in options])])
+    for i in extra:
+        warnings.warn('Ignoring extra parameter: {}'.format(i), UserWarning)
+        del model_params[i]
+
     return params if len(params) > 1 else params[0]
 
-def handle_required(model_params, options = []):
-    params = []
+def handle_required(model_params, options = [], verbose=False):
+    params = {}
     for key in options:
         try:
-            curr = model_params[key]
+            params[key] = model_params.pop(key)
+            if verbose:
+                print("'{}' is set to: {}".format(key, repr(params[key])))
         except KeyError:
-            raise missing_param_error(key)
-        params.append(curr)
-    return params if len(params) > 1 else params[0]
+            raise missingParamError(key)
+    return params
 
-def handle_auto(model_params, options = []):
+def handle_auto(model_params, options = [], verbose=False):
     params = {}
     for key, value in options:
         try:
             curr = model_params[key]
-            print("'{}' is set to modified value of: {}".format(key, curr))
+            if verbose:
+                print("'{}' is set to modified value of: {}".format(key, curr))
         except KeyError:
             curr = value
             # print("'{}' is set to default value of: {}".format(key, value))
@@ -219,6 +238,18 @@ def handle_auto(model_params, options = []):
             curr = [curr]
         params[key] = curr
     return params
+
+def make_arguemnt_list(model, required=[]):
+    sig = getargspec(model.__init__)
+    args, default = list(sig.args[1:]), list(sig.defaults)
+    default = [None]*(len(args) - len(default)) + default
+    for remove in required:
+        ind = args.index(remove)
+        args.pop(ind)
+        default.pop(ind)
+    return zip(args, default)
+
+
 
 
 

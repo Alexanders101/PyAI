@@ -1,5 +1,6 @@
 import warnings
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("always", module="utils")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 __author__ = 'alex'
 __version__ = 2.0
@@ -10,7 +11,7 @@ if version_info[0] == 2:  # Python 2.x
     from utils import *
 elif version_info[0] == 3:  # Python 3.x
     # from PyAI.utils import *
-    from utils import *
+    from PyAI.utils import *
 
 from sklearn import *
 from scipy import stats
@@ -19,6 +20,7 @@ from time import time
 from copy import copy
 from collections import OrderedDict as oDict
 from sklearn.preprocessing.data import binarize
+from multiprocessing import cpu_count
 
 
 import matplotlib.pyplot as plt
@@ -165,52 +167,49 @@ class TRANSFORMATION:
             return ('nystroem', kernel_approximation.Nystroem())
 
 
-class Brain:
-    def __str__(self):
-        if self.__classification:
-            n_classes = len(unique(self.__y_labels))
-        else:
-            n_classes = 'N/A'
-        return ("Number of Samples:        \t\t{}\n"
-                "Number of Features:       \t\t{}\n"
-                "Number of Classes:        \t\t{}\n"
-                "Regression Data:          \t\t{}\n"
-                "Classification Data:      \t\t{}\n\n"
-                "Clustering Enabled:       \t\t{}\n"
-                "Nearest Neighbors Enabled:\t\t{}\n"
-                "SVM Enabled:              \t\t{}\n"
-                "Gaussian Mixture Enabled: \t\t{}".format(self.__n_samples, self.__n_features, n_classes,
-                                                          self.__regression,
-                                                          self.__classification, self.__E_cluster, self.__E_knn,
-                                                          self.__E_svm,
-                                                          self.__E_gmm))
+class Brain(object):
+    """
+    The base class of the PyAI library.
+    
+    ...
+    Parameters
+    ----------
+    x_data : ndarray(n_samples, n_features)
+        The data you wish to perform machine learning algorithm on.
+    y_labels : ndarray(n_samples), optional
+        Class labels for your data set if you have any.
+    y_data : ndarray(nsamples), optional
+        Regression data for your data set if you have any.
+    verbose : [False, True], optional
+        The Brain class will print extra information when performing certain commands
 
-    def __repr__(self):
-        if self.__classification:
-            n_classes = len(unique(self.__y_labels))
-        else:
-            n_classes = 'N/A'
-        return ("n_samples:      {}\n"
-                "n_features:     {}\n"
-                "n_classes:      {}\n"
-                "regression:     {}\n"
-                "classification: {}\n"
-                "E_cluster:      {}\n"
-                "E_knn:          {}\n"
-                "E_svm:          {}\n"
-                "E_gmm:          {}".format(self.__n_samples, self.__n_features, n_classes, self.__regression,
-                                            self.__classification, self.__E_cluster, self.__E_knn, self.__E_svm,
-                                            self.__E_gmm))
+    Attributes
+    ----------
+    x_data : ndarray(n_samples, n_features)
+        The primary data set
+    y_labels : ndarray(n_samples)
+        Class labels for your data set if you have any.
+    y_data : ndarray(nsamples)
+        Regression data for your data set if you have any.
+    __classification : bool
+        Whether or not classification data has been provided.
+    __regression : bool
+        Whether or not regression data has been provided.
+    __data_transformed : bool
+        Whether or not the data has been transformed yet. Set true with init_data_transformation().
+    __E_* : bool
+        A collection of attributes that tell whether a certain algorithm has been
+        initialized yet or not. These are set by their respective init_ methods.
+    n_samples : int
+        Number of data points in x_data.
+    n_features : int
+        Number of dimensions that x_data has.
+    n_classes : int
+        If Classification data is provided, gives you the number of unique classes it holds.
 
+
+    """
     def __init__(self, x_data, y_labels=None, y_data=None, verbose=False):
-        """The base class of the PyAI library.
-
-        This Class will handle all of the initial set up for your data, the only necessary input is your X Data.
-
-        Attributes:
-            x_data (nd_array): An array of shape (nSamples, nFeatures) that stores the data you are learning from
-            y_data (nd_array, None): An array of shape nSamples that stores known values of each data point"""
-
         self.__n_samples, self.__n_features = x_data.shape
 
         # Start: Error Handling
@@ -232,12 +231,7 @@ class Brain:
         self.__y_labels = y_labels
         self.__classification = y_labels is not None
 
-        # If either regression or classification data is given, the data is supervised
-        self.__supervised = self.__classification or self.__regression
-
         self.__data_transformed = False
-        # if transform is not None:
-        #     self.__init_data_handling(transform)
 
         self.__verbose = verbose
 
@@ -251,9 +245,86 @@ class Brain:
         self.__E_ss = False
 
         self.__cur_data_transformed = False
-        self.__labels_predicted = False
+
+    def __str__(self):
+        """
+        Display all of the brain's major properies in a pretty format.
+
+        ...
+        Returns
+        -------
+        str
+            Description of class
+        """
+
+        if self.__classification:
+            n_classes = len(unique(self.__y_labels))
+        else:
+            n_classes = 'N/A'
+        return ("Number of Samples:        \t\t{}\n"
+                "Number of Features:       \t\t{}\n"
+                "Number of Classes:        \t\t{}\n"
+                "Regression Data:          \t\t{}\n"
+                "Classification Data:      \t\t{}\n\n"
+                "Clustering Enabled:       \t\t{}\n"
+                "Nearest Neighbors Enabled:\t\t{}\n"
+                "SVM Enabled:              \t\t{}\n"
+                "Gaussian Mixture Enabled: \t\t{}".format(self.__n_samples, self.__n_features, n_classes,
+                                                          self.__regression,
+                                                          self.__classification, self.__E_cluster, self.__E_knn,
+                                                          self.__E_svm,
+                                                          self.__E_gmm))
+
+    def __repr__(self):
+        """
+        Display all of the brain's major properies in a quick format.
+
+        ...
+        Returns
+        -------
+        str
+            Description of class
+        """
+
+        if self.__classification:
+            n_classes = len(unique(self.__y_labels))
+        else:
+            n_classes = 'N/A'
+
+        return ("n_samples:      {}\n"
+                "n_features:     {}\n"
+                "n_classes:      {}\n"
+                "regression:     {}\n"
+                "classification: {}\n"
+                "{}".format(self.__n_samples, self.__n_features, n_classes, self.__regression, self.__classification,
+                            '\n'.join(['{}:\t{}'.format(key[8:], value) for key, value in self.__dict__.items() if '_E_' in key])))
 
     def init_data_transformation(self, *transformations):
+        """
+        Initialize transformations onto the brain's x data.
+
+        ...
+        Parameters
+        ----------
+        *transformations : TRANSFORMATION
+            Any number of transformations provided by the TRANSFORMATION class in PyAI
+
+        Notes
+        -----
+        All transformations are applied in the order that they are passed
+        to the function
+
+        Examples
+        --------
+        Here we create a basic brain instance with two transformations: A normalization and a linear PCA.
+
+        >>> import numpy as np
+        >>> from PyAI import Brain, TRANSFORMATION
+        >>> x = np.random.rand(10,3)
+        >>> brain = Brain(x)
+        >>> brain.init_data_transformation(TRANSFORMATION.Normalize(), TRANSFORMATION.PCA.LinearPCA())
+        """
+
         self.__manipulator = pipeline.Pipeline(transformations)
         self.__manipulator.fit(self.__x_data)
         self.__x_data = self.__manipulator.transform(self.__x_data)
@@ -261,61 +332,155 @@ class Brain:
         self.refit_models()
 
     # Universal Get Methods
-    def get_point(self, index='all'):
-        if index == 'all':
-            return self.__x_data
-        return self.__x_data[index]
+    @property
+    def x_data(self):
+        """
+        The X data for the machine learning algorithm. This is what you try
+        to learn from.
 
+        """
+        return self.__x_data
+
+    @x_data.setter
+    def x_data(self, other):
+        raise Exception('Please do not modify x_data directly. Use the update_data() method.')
+
+    @property
     @regression_method()
-    def get_data(self, index='all'):
-        if index == 'all':
-            return self.__y_data
-        return self.__y_data[index]
+    def y_data(self):
+        """
+        The regression data associated with your X data.
 
+        """
+        return self.__y_data
+
+    @y_data.setter
+    def y_data(self, other):
+        if self.__regression:
+            warnings.warn("Overwriting previous regression data!", UserWarning)
+        self.__regression = False
+        self.add_regression_data(other)
+
+    @y_data.deleter
+    @regression_method()
+    def y_data(self):
+        print("Removing regression data!")
+        self.__regression = False
+        self.y_data = None
+
+    @property
     @classification_method()
-    def get_label(self, index='all'):
-        if index == 'all':
-            return self.__y_labels
-        return self.__y_labels[index]
+    def y_labels(self):
+        """
+        The classification labels associated with your X data.
+
+        """
+        return self.__y_labels
+
+    @y_labels.setter
+    def y_labels(self, other):
+        if self.__regression:
+            warnings.warn("Overwriting previous classification data!", UserWarning)
+        self.__classification = False
+        self.add_classification_data(other)
+
+    @y_labels.deleter
+    @classification_method()
+    def y_labels(self):
+        print("Removing classification data!")
+        self.__classification = False
+        self.__y_labels = None
+
+    @property
+    def n_samples(self):
+        """
+        The number of samples or X data points.
+
+        """
+        return self.__n_samples
+
+    @n_samples.setter
+    def n_samples(self, other):
+        raise Exception("Cannot overwrite parameter: n_samples")
+
+    @property
+    def n_features(self):
+        """
+        The number of features or deimensions of the X data points.
+
+        """
+        return self.__n_features
+
+    @n_features.setter
+    def n_features(self, other):
+        raise Exception("Cannot overwrite parameter: n_features")
+
+    @property
+    def n_classes(self):
+        """
+        The number of unique classes that exist in the X data.
+        This is 'None' when Brain doesn't have any classification labels.
+
+        """
+        if self.__classification:
+            return len(unique(self.__y_labels))
+        return None
+
+    @n_classes.setter
+    def n_classes(self, other):
+        raise Exception("Cannot overwrite parameter: n_classes")
+    
 
     """CLUSTER BEGIN"""
     # Clustering init Methods
     def init_clustering(self, model=CLUSTER.MiniBatch, **model_params):
+        """
+        Clustering initialization function. This is where you apply
+        various clustering algorithms onto your data.
+
+        ...
+        Parameters
+        ----------
+        model : ClUSTER, optional
+            One of the available algorithms from the CLUSTER object in PyAI.
+        **model_params
+            Any parameters that the chosen algorithm has, refer to the documentation
+            within each CLUSTER object for more information.
+
+        Returns
+        -------
+        bool
+            True if the clusters were created sccessfully, otherwise None.
+
+        """
         # Set params for various clustering types
+        # 
+        # To add more, just create another if statement and then
+        # add any required parameters to the 'required' list
         print("\nStarting Clustering")
+        required = []
         if model is CLUSTER.MiniBatch:
-            n_clusters = handle_required(model_params, ['n_clusters'])
-            batch_size, init = handle_optional(model_params, [['batch_size', 100],
-                                                              ['init', 'k-means++']])
+            required = ['n_clusters']
             self.__cluster_type = 'Mini Batch KMeans Clustering'
-            self.__cluster = model(n_clusters=n_clusters, batch_size=batch_size, init=init)
 
         if model is CLUSTER.KMean:
-            n_clusters = handle_required(model_params, ['n_clusters'])
-            batch_size, init = handle_optional(model_params, [['init', 'k-means++']])
-
+            required = ['n_clusters']
             self.__cluster_type = 'KMeans Clustering'
-            self.__cluster = model(n_clusters=n_clusters, init=init)
 
         if model is CLUSTER.DBScan:
-            eps, min_samples = handle_optional(model_params, [['eps', 0.5],
-                                                              ['min_samples', 5]])
             self.__cluster_type = 'Density Based Clustering'
-            self.__cluster = model(eps=eps, min_samples=min_samples)
 
         if model is CLUSTER.AffProp:
-            damping, convergence_iter = handle_optional(model_params, [['damping', 0.5],
-                                                                       ['convergence_iter', 15]])
             self.__cluster_type = 'Affinity Propagation'
-            self.__cluster = model(damping=damping, convergence_iter=convergence_iter)
 
         if model is CLUSTER.Agglomerative:
-            n_clusters = handle_required(model_params, ['n_clusters'])
-            linkage = handle_optional(model_params, [['linkage', 'ward']])
-
+            required = ['n_clusters']
             self.__cluster_type = 'Agglomerative Clustering'
-            self.__cluster = model(n_clusters=n_clusters, linkage=linkage)
 
+        required_params = handle_required(model_params, required, self.__verbose)
+        handle_optional(model_params, make_arguemnt_list(model, required), self.__verbose)
+        model_params.update(required_params)
+        self.__cluster = model(**model_params)
 
         # Make model with params
         t0 = time()
@@ -333,8 +498,25 @@ class Brain:
         print('Time to complete ' + self.__cluster_type + ' was:\t%.2fs' % (t1 - t0))
         if self.__verbose:
             print(self.__cluster)
+        return True
 
     def init_estimate_labels(self, model=CLUSTER.MiniBatch, **model_params):
+        """
+        Estimated labels initialization function. This is used to quickly create labels
+        for your data using a clustering algorithm. All options are the same as the
+        init_clustering() function.
+        
+        ...
+        Notes
+        -----
+        This function is just a shortcut for manually creating a clusering algorithm
+        and then assigning its labels to the 'y_labels' property. If you wish to use
+        other unsupervised methods besides clustering in order to predict labels,
+        you will have to manually initialize those algorithms and set the 'y_labels'
+        property.
+
+
+        """
         if self.__classification:
             print("Labels already provided, no need to estimate.")
             return
@@ -385,27 +567,98 @@ class Brain:
 
     # Clustering Get Methods
     @init_check('_Brain__E_cluster')
-    def get_cluster(self, label):
+    def get_cluster(self, label, indeces=False):
+        """
+        Get all X data points associated with a cluster label.
+
+        ...
+        Parameters
+        ----------
+        label : int
+            The cluster label / class you wish to get.
+        indeces : [False, True], optional
+            Whether or not to return indeces of points as opposed to
+            the x data itself.
+
+        Returns
+        -------
+        ndarray
+            An array of either data points or indeces.
+
+        """
+        if indeces:
+            return where(self.__cluster_labels == label)[0]
         return self.__x_data[self.__cluster_labels == label]
 
     @regression_method()
     @init_check('_Brain__E_cluster')
-    def get_cluster_data(self, label):
+    def get_cluster_data(self, label, indeces=False):
+        """
+        Get all Y data points associated with a cluster label.
+
+        Regression Method
+
+        ...
+        Parameters
+        ----------
+        label : int
+            The cluster label / class you wish to get.
+        indeces : [False, True], optional
+            Whether or not to return indeces of points as opposed to
+            the x data itself.
+
+        Returns
+        -------
+        ndarray
+            An array of either data points or indeces.
+
+        """
+        if indeces:
+            return where(self.__cluster_labels == label)[0]
         return self.__y_data[self.__cluster_labels == label]
 
     @init_check('_Brain__E_cluster')
     def get_cluster_labels(self):
+        """
+        Get all of the labels generated by the clustering algorithm.
+        
+        ...
+        Returns
+        -------
+        ndarray(nsamples)
+            Array of all labels created by clustering.
+        """
         return self.__cluster_labels
 
     # Clustering Predict Methods
     @init_check('_Brain__E_cluster')
     @data_transform()
     def predict_cluster_class(self, x):
+        """
+        Predict the class of a new data point based on the
+        cluster model generated.
+
+        ...
+        Parameters
+        ----------
+        x : ndarray(n_points, n_features) or ndarray(n_features)
+            A data point or array of data points to predict.
+
+        Returns
+        -------
+        ndarray(n_points) or int
+            The class of a given data points, or an array of classes
+            assigned to array of data points.
+
+        Raises
+        ------
+        ValueError
+            If the cluster algorithm chosen cannot predict new data points.
+        """
         try:
             prediction = self.__cluster.predict(x)
         except AttributeError:
-            print(self.__cluster_type + ' is not able to predict points')
-            return None
+            raise ValueError(self.__cluster_type + ' is not able to predict points')
 
         if len(prediction) == 1:
             return prediction[0]
@@ -413,7 +666,27 @@ class Brain:
 
     @init_check('_Brain__E_cluster')
     @data_transform()
-    def predict_cluster_fuzzy(self, x):
+    def predict_cluster_class_fuzzy(self, x):
+        """
+        Predict the probabilities of a new data point belonging to one
+        of the classes
+
+        ...
+        Parameters
+        ----------
+        x : ndarray(n_points, n_features) or ndarray(n_features)
+            A data point or array of data points to predict.
+
+        Returns
+        -------
+        ndarray(n_points, n_classes) or ndarray(n_classes)
+            The probabilities of belonging to a class for each input point.
+
+        Raises
+        ------
+        ValueError
+            If the cluster algorithm chosen cannot predict new data points.
+        """
         if len(x.shape) is 1:
             x = array([x])
         data = array([transpose(array([self.__cluster_classes,
@@ -627,49 +900,15 @@ class Brain:
 
         if (not self.__classification) and (not self.__regression):
             raise AttributeError('SVM is a supervised method, must provide either regression or classification data')
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         print("\nStarting Support Vector Machine")
-        if model is SVM.Regular:
-            param_grid = handle_auto(model_params, [['C', 1.0],
-                                                    ['epsilon', 0.1],
-                                                    ['kernel', 'rbf'],
-                                                    ['degree', 3],
-                                                    ['gamma', 0.0],
-                                                    ['coef0', 0.0]])
-
-            if self.__regression:
-                self.__svm_reg = grid_search.GridSearchCV(model[1](), param_grid.copy())
-
-            if self.__classification:
-                del param_grid['epsilon']
-                self.__svm_class = grid_search.GridSearchCV(model[0](), param_grid.copy())
-
-        if model is SVM.Linear:
-            param_grid = handle_auto(model_params, [['C', 1.0],
-                                                    ['epsilon', 0.1]])
-            if self.__regression:
-                self.__svm_reg = grid_search.GridSearchCV(model[1](), param_grid.copy())
-
-            if self.__classification:
-                del param_grid['epsilon']
-                self.__svm_class = grid_search.GridSearchCV(model[0](), param_grid.copy())
-
-        if model is SVM.Nu:
-            param_grid = handle_auto(model_params, [['C', 1.0],
-                                                    ['nu', 0.5],
-                                                    ['kernel', 'rbf'],
-                                                    ['degree', 3],
-                                                    ['gamma', 0.0],
-                                                    ['coef0', 0.0]])
-
-            if self.__regression:
-                self.__svm_reg = grid_search.GridSearchCV(model[1](), param_grid.copy())
-
-            if self.__classification:
-                del param_grid['C']
-                self.__svm_class = grid_search.GridSearchCV(model[0](), param_grid.copy())
 
         if self.__regression:
+            param_grid = handle_auto(model_params, make_arguemnt_list(model[1]), self.__verbose)
+            self.__svm_reg = grid_search.GridSearchCV(model[1](), param_grid, 
+                                                      n_jobs=cpu_count()-1, verbose=self.__verbose)
+
             t0 = time()
             self.__svm_reg = self.__svm_reg.fit(self.__x_data, self.__y_data).best_estimator_
             t1 = time()
@@ -679,6 +918,10 @@ class Brain:
                 print(self.__svm_reg)
 
         if self.__classification:
+            param_grid = handle_auto(model_params, make_arguemnt_list(model[0]), self.__verbose)
+            self.__svm_class = grid_search.GridSearchCV(model[0](), param_grid, 
+                                                        n_jobs=cpu_count()-1, verbose=self.__verbose)
+
             t0 = time()
             self.__svm_class = self.__svm_class.fit(self.__x_data, self.__y_labels).best_estimator_
             self.__svm_class_weighted = copy(self.__svm_class)
@@ -1234,10 +1477,10 @@ class Brain:
 
     def add_classification_data(self, labels):
         if self.__classification:
-            print('You already have classification data, no need to add more!')
+            raise ValueError('You already have classification data, no need to add more!')
             return
         if len(labels) != self.__n_samples:
-            print('Length of labels and current X Data do not match.')
+            raise ValueError('Length of labels and current X Data do not match.')
             return
 
         self.__y_labels = labels
@@ -1245,10 +1488,10 @@ class Brain:
 
     def add_regression_data(self, data):
         if self.__regression:
-            print('You already have regression data, no need to add more!')
+            raise ValueError('You already have regression data, no need to add more!')
             return
         if len(data) != self.__n_samples:
-            print('Length of data and current X Data do not match.')
+            raise ValueError('Length of data and current X Data do not match.')
             return
 
         self.__y_labels = data
@@ -1259,10 +1502,10 @@ class Brain:
         # Start: Error Handling
         try:
             if len(new_x[0]) != self.__n_features:
-                print('Error! Wrong data size. Length:\t%i Expected:\t%i' % (len(new_x[0]), self.__n_features))
+                raise ValueError('Error! Wrong data size. Length:\t%i Expected:\t%i' % (len(new_x[0]), self.__n_features))
                 return
         except:
-            print('Input must be in a two dimensional array form')
+            raise ValueError('Input must be in a two dimensional array form')
             return
         # if not check_data(new_x):
         #     return
@@ -1272,7 +1515,7 @@ class Brain:
             if new_data is not None:
                 self.__y_data = concatenate((self.__y_data, new_data), 0)
             else:
-                print('Must update regression data along with x data.')
+                raise ValueError('Must update regression data along with x data.')
                 return
 
         if self.__classification:
@@ -1281,7 +1524,7 @@ class Brain:
             elif self.__E_est:
                 self.__classification = False
             else:
-                print('Must update classification data along with x data.')
+                raise ValueError('Must update classification data along with x data.')
                 return
 
         self.__x_data = concatenate((self.__x_data, new_x), 0)
@@ -1321,17 +1564,23 @@ class Brain:
 # #
 
 def main():
+    global brain
+    global xTrain
+    global xTest
+    global yTrain
+    global yTest
     xData, yData = datasets.make_blobs(1000, 6, 5, random_state=0)
     xTrain, xTest, yTrain, yTest = cross_validation.train_test_split(xData, yData, test_size=0.33, random_state=0)
-    brain = Brain(xTrain, y_labels=yTrain, verbose=True)
-    brain.init_data_transformation(TRANSFORMATION.Standardize(), TRANSFORMATION.PCA.RandomizedPCA())
+    brain = Brain(xTrain, verbose=True)
+    brain.y_labels = yTrain
+    # brain.init_data_transformation(TRANSFORMATION.Standardize(), TRANSFORMATION.PCA.RandomizedPCA())
     brain.init_clustering(model=CLUSTER.MiniBatch, n_clusters=5)
-    brain.init_svm(model=SVM.Nu, nu=arange(0.1, 0.9, 0.1))
-    brain.init_gmm(n_components=5)
-    brain.init_neighbors()
-    brain.init_naive_bayes()
-    brain.predict_all_class(xTest[0])
-    brain.calculate_weights(xTest, yTest, cutoff=0.5)
+    # brain.init_svm(model=SVM.Nu, nu=arange(0.1, 0.9, 0.1))
+    # brain.init_gmm(n_components=5)
+    # brain.init_neighbors()
+    # brain.init_naive_bayes()
+    # brain.predict_all_class(xTest[0])
+    # brain.calculate_weights(xTest, yTest, cutoff=0.5)
 
 if __name__ == "__main__":
     main()

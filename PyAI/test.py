@@ -1,3 +1,4 @@
+from __future__ import print_function
 __author__ = 'alex'
 
 import warnings
@@ -9,8 +10,8 @@ if version_info[0] == 2: # Python 2.x
     from PyAI import *
     from PyAI import __version__
 elif version_info[0] == 3: # Python 3.x
-    from PyAI import *
-    from PyAI import __version__
+    from PyAI.PyAI import *
+    from PyAI.PyAI import __version__
 
 import unittest
 import sys
@@ -97,8 +98,17 @@ class KNNTestCase(unittest.TestCase):
 
 def test():
     sys.stdout = open(os.devnull, "w")
-    unittest.main()
+    suite = []
+    suite.append(['Clustering', unittest.TestLoader().loadTestsFromTestCase(ClusterTestCase)])
+    suite.append(['Support Vector Machine', unittest.TestLoader().loadTestsFromTestCase(SVMTestCase)])
+    suite.append(['KNN', unittest.TestLoader().loadTestsFromTestCase(KNNTestCase)])
+    
+    for name, test in suite:
+    	print('Testing: {0}\n'.format(name), file=sys.stderr)
+    	unittest.TextTestRunner(verbosity=1).run(test)
     sys.stdout = sys.__stdout__
+
+
 
 if __name__ == '__main__':
     test()
