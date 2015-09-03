@@ -1,6 +1,6 @@
 Metadata-Version: 1.1
 Name: PyAI
-Version: 0.9
+Version: 2.12
 Author: Alex Shmakov
 Author-email: Alexanders101 at gmail com
 Home-page: https://github.com/Alexanders101/PyAI
@@ -8,10 +8,20 @@ Download-url: UNKNOWN
 Summary: Python Machine Learning Framework
 License: UNKNOWN
 Description: A generic python machine learning framework designed to be flexible and easy to use. It is built upon scikit-learn, numpy, scipy, and some custom written algorithms.
+        
+        New in version 2.x:
+        
+             Complete rewrite of main codebase in order to ease in adding new algorithms and much   cleaner code
+        
+        To test it, simply run:
+        
+            import PyAI
+        
+            PyAI.test()
 Platform: Linux, Windows, Mac
-Requires: sklearn
-Requires: numpy
-Requires: decorator
-Requires: scipy
 Requires: matplotlib
+Requires: scipy
+Requires: decorator
+Requires: numpy
+Requires: sklearn
 Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
